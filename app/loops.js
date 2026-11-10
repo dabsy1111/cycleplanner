@@ -4,13 +4,7 @@
 const LOOP_BEARINGS = [0, 60, 120, 180, 240, 300];
 let loopResults = [];
 
-async function fetchRoute(points, profile) {
-  const lonlats = points.map((p) => `${p[0].toFixed(6)},${p[1].toFixed(6)}`).join('|');
-  const res = await fetch(`${BROUTER_URL}?lonlats=${lonlats}&profile=${encodeURIComponent(profile)}&alternativeidx=0&format=geojson`);
-  const text = await res.text();
-  if (!res.ok || !text.trim().startsWith('{')) throw new Error(text.trim().slice(0, 120) || `HTTP ${res.status}`);
-  return parseBRouter(JSON.parse(text));
-}
+function fetchRoute(points, profile) { return brouterRoute(points, profile); }
 
 function circlePoints(start, brg, radius) {
   const centre = destination(start, brg, radius);

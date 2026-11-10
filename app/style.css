@@ -136,3 +136,6 @@ input[type=datetime-local] { padding: 3px 5px; border: 1px solid var(--line); bo
 .eff-letter { width: 20px; height: 20px; flex: none; border-radius: 50%; background: #fcc419; color: #1d2125; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 
 .slider { flex: 1; accent-color: #be4bdb; }
+
+.opts { justify-content: space-between; }
+.opts .check { margin: 0; }

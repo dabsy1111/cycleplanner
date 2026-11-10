@@ -30,6 +30,12 @@ The web port is `8095`; change the left side of `8095:80` if that clashes with s
 
 The `history` service pulls GPS tracks of your outdoor rides from intervals.icu and stores them in `data/history`. Indoor, Zwift and trainer rides are skipped. Rides that reached intervals.icu through Strava can't be fetched (Strava doesn't allow it), so they're skipped too; rides synced straight from Garmin, Wahoo or Hammerhead work. The key never leaves your server.
 
+## Routing options
+
+The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `cp-safety`, `cp-trekking`, `cp-gravel`, built into the image by `docker/patch-profile.awk`). They add one setting, `avoid_footpaths`: footways, pedestrian areas and foot-only paths that aren't signed for bikes cost at least 6× as much, so they're only used as short links where nothing else goes through. WA allows footpath riding, so many ordinary footpaths are tagged `bicycle=yes` and the stock profiles happily use them.
+
+"Avoid busy roads" sets each profile's own traffic option per request. If a patched profile ever fails to load, the app falls back to the stock one and says so.
+
 ## Changing how it routes
 
 Routing profiles live in `data/profiles/*.brf` inside the stack folder (`/opt/stacks/cycleplanner/data/profiles` on a default Dockge install). Edits are picked up on the next request.

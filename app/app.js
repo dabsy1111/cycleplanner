@@ -17,12 +17,12 @@ const SURFACE = {
   unknown:  { label: 'Unknown', color: '#9ca3af' },
 };
 const WAY = {
-  bikepath: { label: 'Bike path', color: '#1a9850' },
-  shared:   { label: 'Footpath / shared path', color: '#91cf60' },
+  bikepath: { label: 'Bike or shared path (signed for bikes)', color: '#1a9850' },
+  footpath: { label: 'Footpath (not signed for bikes)', color: '#f06595' },
   lane:     { label: 'Road with bike lane', color: '#4575b4' },
   minor:    { label: 'Minor road', color: '#f4a340' },
   main:     { label: 'Main road', color: '#d73027' },
-  track:    { label: 'Track', color: '#8c510a' },
+  track:    { label: 'Track or trail', color: '#8c510a' },
   other:    { label: 'Other', color: '#9ca3af' },
 };
 const ROUTE_COLOR = '#d6336c';
@@ -73,8 +73,9 @@ function surfaceClass(t) {
 }
 function wayClass(t) {
   const h = t.highway || '';
-  if (h === 'cycleway' || ((h === 'path' || h === 'footway') && t.bicycle === 'designated')) return 'bikepath';
-  if (['path', 'footway', 'pedestrian', 'bridleway', 'steps'].includes(h)) return 'shared';
+  if (h === 'cycleway' || (['path', 'footway', 'pedestrian', 'bridleway'].includes(h) && t.bicycle === 'designated')) return 'bikepath';
+  if (['footway', 'pedestrian', 'steps', 'corridor'].includes(h) || (h === 'path' && t.foot === 'designated')) return 'footpath';
+  if (h === 'path' || h === 'bridleway') return 'track';
   if (h === 'track') return 'track';
   if (!ROADS.has(h)) return 'other';
   const lane = ['cycleway', 'cycleway:left', 'cycleway:right', 'cycleway:both']
@@ -248,22 +249,56 @@ function renderMarkers() {
 // ---------- routing ----------
 function showMsg(text) { const m = $('msg'); m.textContent = text || ''; m.hidden = !text; }
 
+// Routing options go to our patched profiles (cp-*) as BRouter profile parameters.
+const TRAFFIC_PARAM = {
+  fastbike: ['consider_traffic', '1'], safety: ['consider_traffic', '1'],
+  trekking: ['consider_traffic', '1'], gravel: ['consider_traffic_estimate', '1'],
+};
+let patchedProfilesBroken = false;
+
+function brouterUrl(points, profile, stock = false) {
+  const lonlats = points.map((p) => `${(+p[0]).toFixed(6)},${(+p[1]).toFixed(6)}`).join('|');
+  let url = `${BROUTER_URL}?lonlats=${lonlats}&alternativeidx=0&format=geojson&profile=`;
+  if (stock) return url + encodeURIComponent(profile);
+  url += encodeURIComponent('cp-' + profile);
+  url += `&profile:avoid_footpaths=${$('opt-footpaths').checked ? 1 : 0}`;
+  if ($('opt-traffic').value === 'avoid' && TRAFFIC_PARAM[profile]) url += `&profile:${TRAFFIC_PARAM[profile][0]}=${TRAFFIC_PARAM[profile][1]}`;
+  return url;
+}
+
+// Fetch and parse a route. If our patched profile ever fails where the stock one works,
+// fall back to the stock profile and say so.
+async function brouterRoute(points, profile, signal) {
+  const get = async (url) => {
+    const res = await fetch(url, { signal });
+    const text = await res.text();
+    if ([502, 503, 504].includes(res.status)) throw new Error('the router is still starting up (first start downloads the map data). Try again in a minute.');
+    if (!res.ok || !text.trim().startsWith('{')) { const e = new Error(text.trim().slice(0, 200) || `HTTP ${res.status}`); e.routing = true; throw e; }
+    return parseBRouter(JSON.parse(text));
+  };
+  if (!patchedProfilesBroken) {
+    try { return await get(brouterUrl(points, profile)); } catch (e) {
+      if (!e.routing) throw e;
+      const rt = await get(brouterUrl(points, profile, true)); // throws the real routing error if this fails too
+      patchedProfilesBroken = true;
+      console.warn('Patched profile failed, using stock profile:', e.message);
+      return rt;
+    }
+  }
+  return get(brouterUrl(points, profile, true));
+}
+
 async function requestRoute(fit) {
   if (routeAbort) routeAbort.abort();
   if (waypoints.length < 2) { route = null; renderRoute(); return; }
   const seq = ++routeSeq;
   routeAbort = new AbortController();
-  const lonlats = waypoints.map((w) => `${w.lng.toFixed(6)},${w.lat.toFixed(6)}`).join('|');
-  const url = `${BROUTER_URL}?lonlats=${lonlats}&profile=${encodeURIComponent($('profile').value)}&alternativeidx=0&format=geojson`;
   showMsg('Routing…');
   try {
-    const res = await fetch(url, { signal: routeAbort.signal });
-    const text = await res.text();
+    const rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal);
     if (seq !== routeSeq) return;
-    if ([502, 503, 504].includes(res.status)) throw new Error('the router is still starting up (first start downloads the map data). Try again in a minute.');
-    if (!res.ok || !text.trim().startsWith('{')) throw new Error(text.trim().slice(0, 200) || `HTTP ${res.status}`);
-    route = parseBRouter(JSON.parse(text));
-    showMsg('');
+    route = rt;
+    showMsg(patchedProfilesBroken ? 'Footpath and traffic options are unavailable (profile error), using the standard profile.' : '');
     renderRoute();
     if (fit) fitRoute();
   } catch (err) {
@@ -701,7 +736,8 @@ function writeHash() {
 }
 function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
-  const prof = params.get('p');
+  let prof = params.get('p');
+  if (prof === 'fastbike-lowtraffic') { prof = 'fastbike'; $('opt-traffic').value = 'avoid'; }
   if (prof && [...$('profile').options].some((o) => o.value === prof)) $('profile').value = prof;
   const w = params.get('w');
   if (!w) return null;
@@ -723,7 +759,7 @@ function renderSaved() {
     const li = document.createElement('li');
     li.innerHTML = `<span>${escapeHtml(r.name)} <small class="small">${r.km ?? ''} km</small></span><button title="Delete">✕</button>`;
     li.querySelector('span').onclick = () => {
-      $('profile').value = r.profile || 'fastbike';
+      $('profile').value = r.profile === 'fastbike-lowtraffic' ? 'fastbike' : (r.profile || 'fastbike');
       $('route-name').value = r.name;
       setWaypoints(r.wp, { fit: true });
     };
@@ -751,6 +787,8 @@ $('undo').onclick = () => { if (undoStack.length) setWaypoints(undoStack.pop(), 
 $('reverse').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints].reverse()); };
 $('loop').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints, { ...waypoints[0] }]); };
 $('clear').onclick = () => { if (waypoints.length) setWaypoints([]); };
+$('opt-footpaths').onchange = () => { store.set('cp.footpaths', $('opt-footpaths').checked); requestRoute(false); };
+$('opt-traffic').onchange = () => { store.set('cp.traffic', $('opt-traffic').value); requestRoute(false); };
 $('profile').onchange = () => { store.set('cp.profile', $('profile').value); writeHash(); requestRoute(false); };
 $('speed').oninput = () => { store.set('cp.speed', $('speed').value); renderStats(); };
 $('colour-by').onchange = () => { store.set('cp.colour', $('colour-by').value); if (map.getSource('route')) map.getSource('route').setData(routeFeatures()); };
@@ -794,6 +832,8 @@ function applyMapDetails() {
 for (const k of Object.keys(MAP_DETAILS)) $('md-' + k).addEventListener('change', applyMapDetails);
 
 function restoreSettings() {
+  $('opt-footpaths').checked = store.get('cp.footpaths', true);
+  $('opt-traffic').value = store.get('cp.traffic', 'normal');
   for (const [k, def] of Object.entries(MAP_DETAILS)) $('md-' + k).checked = store.get('cp.md.' + k, def);
   applyMapDetails();
   // Collapsible panel sections remember whether they were open.
@@ -806,6 +846,7 @@ function restoreSettings() {
     });
   });
   $('profile').value = store.get('cp.profile', 'fastbike');
+  if (!$('profile').value) $('profile').value = 'fastbike';
   $('speed').value = store.get('cp.speed', 27);
   $('colour-by').value = store.get('cp.colour', 'none');
   const cyc = store.get('cp.cyclosm', false);

@@ -49,7 +49,7 @@ function interruptions(rt, nodes) {
     if (hit.poi.kind === 'crossing') {
       // A zebra on the road you're riding rarely stops you; a path crossing a road does.
       const seg = segAt(m);
-      const onPath = seg && ['bikepath', 'shared', 'track', 'other'].includes(wayClass(seg.tags));
+      const onPath = seg && ['bikepath', 'footpath', 'track', 'other'].includes(wayClass(seg.tags));
       if (!onPath) continue;
     }
     out.push({ at: m, kind: hit.poi.kind });

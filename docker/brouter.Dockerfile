@@ -1,12 +1,16 @@
 FROM alpine:3.20 AS fetch
 ARG BROUTER_VERSION=1.7.9
+COPY docker/patch-profile.awk /tmp/patch-profile.awk
 RUN apk add --no-cache curl unzip \
  && curl -fsSL -o /tmp/brouter.zip \
       "https://github.com/abrensch/brouter/releases/download/v${BROUTER_VERSION}/brouter-${BROUTER_VERSION}.zip" \
  && unzip -q /tmp/brouter.zip -d /tmp \
  && mkdir -p /opt/brouter \
  && mv "/tmp/brouter-${BROUTER_VERSION}/brouter-${BROUTER_VERSION}-all.jar" /opt/brouter/brouter.jar \
- && mv "/tmp/brouter-${BROUTER_VERSION}/profiles2" /opt/brouter/profiles-default
+ && mv "/tmp/brouter-${BROUTER_VERSION}/profiles2" /opt/brouter/profiles-default \
+ && for p in fastbike fastbike-lowtraffic safety trekking gravel; do \
+      awk -f /tmp/patch-profile.awk "/opt/brouter/profiles-default/$p.brf" > "/opt/brouter/profiles-default/cp-$p.brf" || exit 1; \
+    done
 
 FROM eclipse-temurin:21-jre
 RUN apt-get update \

@@ -22,10 +22,17 @@
   <div class="row">
     <select id="profile" title="Routing profile">
       <option value="fastbike">Road: fastest</option>
-      <option value="fastbike-lowtraffic">Road: low traffic</option>
       <option value="safety">Safest (paths first)</option>
       <option value="trekking">Mixed / touring</option>
       <option value="gravel">Gravel</option>
+    </select>
+  </div>
+
+  <div class="row small opts">
+    <label class="check"><input id="opt-footpaths" type="checkbox" checked> Avoid footpaths</label>
+    <select id="opt-traffic" class="inline" title="Traffic">
+      <option value="normal">Traffic: normal</option>
+      <option value="avoid">Traffic: avoid busy roads</option>
     </select>
   </div>
 

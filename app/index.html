@@ -43,30 +43,30 @@
   <div id="msg" class="row msg" hidden></div>
 
   <div class="scroll">
-    <section>
-      <h3>Elevation</h3>
+    <details class="sec" data-key="elev" open>
+      <summary>Elevation</summary>
       <div class="elev-wrap"><canvas id="elev"></canvas><div id="elev-tip" hidden></div></div>
-    </section>
+    </details>
 
-    <section>
-      <h3>Surface</h3>
+    <details class="sec" data-key="surface" open>
+      <summary>Surface</summary>
       <div id="bd-surface" class="breakdown"></div>
       <h3>Way type</h3>
       <div id="bd-way" class="breakdown"></div>
-    </section>
+    </details>
 
-    <section>
-      <h3>Toilets &amp; water along the route</h3>
+    <details class="sec" data-key="stops">
+      <summary>Toilets &amp; water along the route</summary>
       <div class="row small">
         Within <input id="poi-radius" type="number" min="50" max="1000" step="50" value="250"> m of the route,
         warn on gaps over <input id="gap-km" type="number" min="5" max="200" step="5" value="25"> km
       </div>
       <div id="gaps"></div>
       <ul id="stops" class="stops"></ul>
-    </section>
+    </details>
 
-    <section>
-      <h3>Export &amp; save</h3>
+    <details class="sec" data-key="export" open>
+      <summary>Export &amp; save</summary>
       <div class="row">
         <input id="route-name" type="text" placeholder="Route name">
       </div>
@@ -77,10 +77,10 @@
         <button id="share">Copy link</button>
       </div>
       <ul id="saved" class="saved"></ul>
-    </section>
+    </details>
 
-    <section>
-      <h3>Map</h3>
+    <details class="sec" data-key="map" open>
+      <summary>Map</summary>
       <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
       <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets &amp; water (zoom in to see)</label>
       <div class="row small">
@@ -92,7 +92,7 @@
         </select>
       </div>
       <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. Tap a point to remove it.</p>
-    </section>
+    </details>
   </div>
 </aside>
 

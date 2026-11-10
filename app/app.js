@@ -729,6 +729,15 @@ $('gap-km').onchange = renderStops;
 $('handle').onclick = () => { $('panel').classList.toggle('collapsed'); setTimeout(() => drawElevation(), 250); };
 
 function restoreSettings() {
+  // Collapsible panel sections remember whether they were open.
+  document.querySelectorAll('details.sec').forEach((d) => {
+    const saved = store.get('cp.sec.' + d.dataset.key, null);
+    if (saved != null) d.open = saved;
+    d.addEventListener('toggle', () => {
+      store.set('cp.sec.' + d.dataset.key, d.open);
+      if (d.open && d.dataset.key === 'elev') drawElevation();
+    });
+  });
   $('profile').value = store.get('cp.profile', 'fastbike');
   $('speed').value = store.get('cp.speed', 27);
   $('colour-by').value = store.get('cp.colour', 'none');

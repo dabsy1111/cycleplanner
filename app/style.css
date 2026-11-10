@@ -41,7 +41,15 @@ html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "
 .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .row.small, .small { font-size: 12.5px; color: var(--muted); }
 .scroll { overflow-y: auto; flex: 1; min-height: 0; padding-right: 2px; }
-section { border-top: 1px solid var(--line); padding: 8px 0; }
+details.sec { border-top: 1px solid var(--line); padding: 8px 0; }
+details.sec > summary {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; padding: 2px 0; user-select: none;
+}
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::before { content: "▸"; font-size: 11px; transition: transform .15s; }
+details.sec[open] > summary::before { transform: rotate(90deg); }
+details.sec[open] > summary { margin-bottom: 6px; }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 4px 0 6px; }
 
 input, select, button { font: inherit; }

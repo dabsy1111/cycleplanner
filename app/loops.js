@@ -138,7 +138,7 @@ map.on('load', () => {
   map.addLayer({ id: 'loops', type: 'line', source: 'loops',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
     paint: {
-      'line-color': ['case', ['==', ['get', 'hl'], 1], '#7048e8', '#495057'],
+      'line-color': ['case', ['==', ['get', 'hl'], 1], '#1971c2', '#495057'],
       'line-width': ['case', ['==', ['get', 'hl'], 1], 5, 2.5],
       'line-opacity': ['case', ['==', ['get', 'hl'], 1], 0.95, 0.5],
     } }, 'route-casing');

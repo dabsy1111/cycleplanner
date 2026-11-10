@@ -99,7 +99,7 @@ input[type=number] { width: 58px; padding: 2px 4px; border: 1px solid var(--line
 .stops li .off { color: var(--muted); margin-left: auto; white-space: nowrap; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; margin-top: 4px; }
 .dot.water { background: #1c7ed6; }
-.dot.toilet { background: #7048e8; }
+.dot.toilet { background: #0b7285; }
 .gap { background: var(--warn-bg); color: var(--warn-fg); border-radius: 6px; padding: 5px 8px; margin: 4px 0; font-size: 13px; }
 
 .saved li { display: flex; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -135,4 +135,4 @@ input[type=datetime-local] { padding: 3px 5px; border: 1px solid var(--line); bo
 .stops li.active { background: #fff9db; }
 .eff-letter { width: 20px; height: 20px; flex: none; border-radius: 50%; background: #fcc419; color: #1d2125; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; }
 
-.slider { flex: 1; accent-color: #1f2f5c; }
+.slider { flex: 1; accent-color: #be4bdb; }

@@ -67,6 +67,41 @@ def simplify(points, min_gap=12.0):
     return out
 
 
+def rdp(points, tol_m=6.0):
+    """Douglas-Peucker: keep only the points needed to stay within tol_m of the original line."""
+    if len(points) < 3:
+        return points
+    lat0 = math.radians(points[0][1])
+    kx, ky = 111320 * math.cos(lat0), 110574
+    xy = [(p[0] * kx, p[1] * ky) for p in points]
+    keep = [False] * len(points)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(points) - 1)]
+    tol2 = tol_m * tol_m
+    while stack:
+        a, b = stack.pop()
+        ax, ay = xy[a]
+        bx, by = xy[b]
+        dx, dy = bx - ax, by - ay
+        len2 = dx * dx + dy * dy
+        worst, wi = -1.0, -1
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            if len2:
+                t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / len2))
+                ex, ey = ax + t * dx - px, ay + t * dy - py
+            else:
+                ex, ey = px - ax, py - ay
+            d2 = ex * ex + ey * ey
+            if d2 > worst:
+                worst, wi = d2, i
+        if worst > tol2:
+            keep[wi] = True
+            stack.append((a, wi))
+            stack.append((wi, b))
+    return [p for p, k in zip(points, keep) if k]
+
+
 def load_state():
     try:
         with open(STATE) as f:
@@ -159,7 +194,7 @@ def tracks_body():
             except (OSError, ValueError):
                 continue
             feats.append({"type": "Feature", "properties": {"id": r["id"], "name": r["name"], "date": r["date"]},
-                          "geometry": {"type": "LineString", "coordinates": r["coords"]}})
+                          "geometry": {"type": "LineString", "coordinates": rdp(r["coords"])}})
         tracks_cache.update(mtime=mtime, body=json.dumps({"type": "FeatureCollection", "features": feats},
                                                          separators=(",", ":")).encode())
     return tracks_cache["body"]

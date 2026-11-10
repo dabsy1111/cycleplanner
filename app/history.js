@@ -49,7 +49,7 @@ function newRoadShare(rt) {
 colourers.new = (rt) => routePieces(rt, 100).map((p) => {
   let fresh = 0, n = 0;
   for (let i = p.i0; i <= p.i1; i++) { n++; if (!isRidden(rt.coords[i][0], rt.coords[i][1])) fresh++; }
-  return { ...p, color: !ridden ? ROUTE_COLOR : fresh / n > 0.5 ? '#7048e8' : '#adb5bd' };
+  return { ...p, color: !ridden ? ROUTE_COLOR : fresh / n > 0.5 ? '#1098ad' : '#adb5bd' };
 });
 
 function renderNewShare() {
@@ -95,20 +95,26 @@ async function checkHistory(reloadTracks) {
 }
 
 map.on('load', () => {
-  map.addSource('history', { type: 'geojson', data: emptyFC() });
+  // tolerance simplifies the many history lines harder per zoom level, which keeps redraws cheap.
+  map.addSource('history', { type: 'geojson', data: emptyFC(), tolerance: 1.5, buffer: 32 });
   map.addLayer({ id: 'history', type: 'line', source: 'history',
-    layout: { 'line-join': 'round', 'line-cap': 'round', visibility: store.get('cp.hist', true) ? 'visible' : 'none' },
-    paint: { 'line-color': '#1f2f5c', 'line-opacity': histOpacity(), 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 16, 4] } }, 'route-casing');
+    layout: { visibility: store.get('cp.hist', true) ? 'visible' : 'none' },
+    paint: { 'line-color': '#be4bdb', 'line-opacity': histOpacity(), 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 16, 4] } }, 'route-casing');
   checkHistory(true);
 });
 
 function histOpacity() { return (+$('hist-opacity').value || 45) / 100; }
 $('hist-opacity').value = store.get('cp.histop', 45);
+let opacityFrame = 0;
 $('hist-opacity').addEventListener('input', () => {
-  store.set('cp.histop', +$('hist-opacity').value);
   $('hist-opacity-val').textContent = `${$('hist-opacity').value}%`;
-  if (map.getLayer('history')) map.setPaintProperty('history', 'line-opacity', histOpacity());
+  if (opacityFrame) return;
+  opacityFrame = requestAnimationFrame(() => {
+    opacityFrame = 0;
+    if (map.getLayer('history')) map.setPaintProperty('history', 'line-opacity', histOpacity());
+  });
 });
+$('hist-opacity').addEventListener('change', () => store.set('cp.histop', +$('hist-opacity').value));
 $('hist-opacity-val').textContent = `${$('hist-opacity').value}%`;
 $('hist-show').checked = store.get('cp.hist', true);
 $('hist-show').onchange = (e) => {

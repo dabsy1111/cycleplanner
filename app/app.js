@@ -153,7 +153,7 @@ map.on('load', () => {
   map.addLayer({ id: 'pois', type: 'circle', source: 'pois', minzoom: 11,
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 16, 7],
-      'circle-color': ['match', ['get', 'kind'], 'water', '#1c7ed6', '#7048e8'],
+      'circle-color': ['match', ['get', 'kind'], 'water', '#1c7ed6', '#0b7285'],
       'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5,
     } });
 
@@ -421,7 +421,7 @@ function drawElevation(hoverIdx) {
 
   // toilet / water ticks along the bottom
   for (const s of stopsOnRoute) {
-    ctx.fillStyle = s.poi.kind === 'water' ? '#1c7ed6' : '#7048e8';
+    ctx.fillStyle = s.poi.kind === 'water' ? '#1c7ed6' : '#0b7285';
     ctx.fillRect(X(s.km * 1000) - 1, h - pad.b - 5, 2, 5);
   }
 

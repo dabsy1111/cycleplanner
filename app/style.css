@@ -122,3 +122,15 @@ input[type=number] { width: 58px; padding: 2px 4px; border: 1px solid var(--line
 .maplibregl-popup-content { font-size: 13px; padding: 10px 12px; }
 .maplibregl-popup-content b { display: block; margin-bottom: 2px; }
 .maplibregl-popup-content button { margin-top: 6px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: #f8f9fa; cursor: pointer; }
+
+select.inline { width: auto; padding: 2px 4px; }
+input[type=datetime-local] { padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; font: inherit; }
+#wind-summary p { margin: 6px 0; }
+#wind-badge {
+  position: fixed; z-index: 1; top: 10px; right: 52px; background: rgba(255,255,255,.95);
+  border-radius: 8px; padding: 5px 9px; font-size: 13px; box-shadow: 0 1px 6px rgba(0,0,0,.2); white-space: nowrap;
+}
+#wind-arrow { display: inline-block; font-weight: 700; color: #1c7ed6; }
+.stops li .tag { font-size: 11px; padding: 0 5px; border-radius: 4px; background: #e7f5ff; color: #1864ab; margin-left: 4px; }
+.stops li.active { background: #fff9db; }
+.eff-letter { width: 20px; height: 20px; flex: none; border-radius: 50%; background: #fcc419; color: #1d2125; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; }

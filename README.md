@@ -6,7 +6,7 @@ Self-hosted bike route planner: BRouter for routing, a MapLibre web app on top. 
 
 1. In Dockge, click **+ Compose** and name the stack `cycleplanner`.
 2. Paste the contents of [`compose.yaml`](compose.yaml) and click **Deploy**.
-3. Open `http://<server-ip>:8090`.
+3. Open `http://<server-ip>:8095`.
 
 On first start BRouter downloads the routing data (about 12 MB for Perth), so routing gives a "still starting" message for the first minute or so.
 
@@ -20,7 +20,15 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `REFRESH_DAYS` | `7` | Re-download the OpenStreetMap routing data when it's older than this. `0` turns it off. BRouter restarts itself after a refresh. |
 | `JAVA_MAX_HEAP` | `1g` | Memory for BRouter. 1g is plenty for one or two tiles. |
 
-The web port is `8090`; change the left side of `8090:80` if that clashes with something.
+| `ICU_API_KEY` (history) | empty | Your intervals.icu API key, from intervals.icu → Settings → Developer Settings. Turns on ride history. |
+| `SYNC_HOURS` (history) | `6` | How often to pull new rides from intervals.icu. `0` = only when you press Sync. |
+| `HISTORY_SINCE` (history) | `2015-01-01` | Oldest rides to fetch. |
+
+The web port is `8095`; change the left side of `8095:80` if that clashes with something.
+
+## Ride history
+
+The `history` service pulls GPS tracks of your outdoor rides from intervals.icu and stores them in `data/history`. Indoor, Zwift and trainer rides are skipped. Rides that reached intervals.icu through Strava can't be fetched (Strava doesn't allow it), so they're skipped too; rides synced straight from Garmin, Wahoo or Hammerhead work. The key never leaves your server.
 
 ## Changing how it routes
 
@@ -39,6 +47,10 @@ Tailscale is the easiest way. `tailscale serve --bg 8090` on the server also giv
 - Toilets and drinking water from OpenStreetMap (nothing inside shopping centres, indoor or customers-only), listed along the route with gap warnings
 - GPX download with toilets and water as waypoints, routes saved in the browser, shareable links
 - Place search, CyclOSM overlay, bottom-sheet layout on phones
+- Wind: hourly forecast for your departure time, headwind/tailwind along the route, route colouring by wind, and a "ride it the other way" suggestion for loops
+- Interval stretches: the longest parts of the route with no lights, stop/give way, roundabouts, barriers, sharp turns or path crossings, filtered by minimum minutes and flat/climb
+- Loop generator: six loops of your chosen distance in different directions, each ridden the way that puts the wind behind you home, with climbing, main-road share and how much is new to you
+- Ride history: your intervals.icu rides on the map, "% new roads" for any route, and route colouring by new vs ridden
 
 ## Repo layout
 
@@ -48,7 +60,9 @@ app/                          the web app
 docker/web.Dockerfile         nginx + app
 docker/brouter.Dockerfile     BRouter 1.7.9
 docker/brouter-entrypoint.sh  data download, weekly refresh, server start
+docker/history.Dockerfile     intervals.icu history service
+history/server.py             the history service (Python standard library only)
 .github/workflows/images.yml  builds and pushes both images on every push to main
 ```
 
-The browser also talks to OpenFreeMap (map tiles), CyclOSM, Nominatim (search) and the Overpass API (toilets and water). All free and keyless.
+The browser also talks to OpenFreeMap (map tiles), CyclOSM, Nominatim (search), the Overpass API (toilets, water, lights and crossings) and Open-Meteo (wind). All free and keyless.

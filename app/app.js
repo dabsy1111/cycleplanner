@@ -84,6 +84,32 @@ function wayClass(t) {
   return 'minor';
 }
 
+// ---------- extension points (used by wind.js, efforts.js, loops.js, history.js) ----------
+const routeHooks = [];   // called with the new route (or null) after every reroute
+const colourers = {};    // 'colour route by' modes: fn(route) -> [{i0, i1, color}]
+function bearing(a, b) {
+  const r = Math.PI / 180;
+  const y = Math.sin((b[0] - a[0]) * r) * Math.cos(b[1] * r);
+  const x = Math.cos(a[1] * r) * Math.sin(b[1] * r) - Math.sin(a[1] * r) * Math.cos(b[1] * r) * Math.cos((b[0] - a[0]) * r);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+function destination(p, brg, metres) {
+  const R = 6371008.8, r = Math.PI / 180, d = metres / R, t = brg * r;
+  const lat1 = p[1] * r, lon1 = p[0] * r;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(t));
+  const lon2 = lon1 + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+  return [lon2 / r, lat2 / r];
+}
+// Split a route into pieces of roughly `step` metres (for per-piece colouring).
+function routePieces(rt, step = 150) {
+  const out = [];
+  let i0 = 0;
+  for (let i = 1; i < rt.coords.length; i++) {
+    if (rt.cum[i] - rt.cum[i0] >= step || i === rt.coords.length - 1) { out.push({ i0, i1: i }); i0 = i; }
+  }
+  return out;
+}
+
 // ---------- state ----------
 let waypoints = [];        // [{lng, lat}]
 let markers = [];
@@ -287,6 +313,15 @@ function routeFeatures() {
   if (mode === 'none') {
     return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.coords } }] };
   }
+  if (colourers[mode]) {
+    return {
+      type: 'FeatureCollection',
+      features: colourers[mode](route).map((p) => ({
+        type: 'Feature', properties: { color: p.color },
+        geometry: { type: 'LineString', coordinates: route.coords.slice(p.i0, p.i1 + 1) },
+      })),
+    };
+  }
   const table = mode === 'surface' ? SURFACE : WAY;
   const cls = mode === 'surface' ? surfaceClass : wayClass;
   return {
@@ -306,7 +341,9 @@ function renderRoute() {
   renderBreakdown('bd-surface', SURFACE, surfaceClass);
   renderBreakdown('bd-way', WAY, wayClass);
   updateStops();
+  for (const h of routeHooks) { try { h(route); } catch (e) { console.error(e); } }
 }
+function refreshRouteColours() { if (map.getSource('route')) map.getSource('route').setData(routeFeatures()); }
 
 function fitRoute() {
   if (!route) return;

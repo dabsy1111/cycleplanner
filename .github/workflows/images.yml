@@ -19,6 +19,8 @@ jobs:
             file: docker/web.Dockerfile
           - name: brouter
             file: docker/brouter.Dockerfile
+          - name: history
+            file: docker/history.Dockerfile
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3

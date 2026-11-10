@@ -9,10 +9,20 @@ services:
     volumes:
       - ./data:/data
 
+  history:
+    image: ghcr.io/dabsy1111/cycleplanner-history:latest
+    restart: unless-stopped
+    environment:
+      ICU_API_KEY: ""        # intervals.icu > Settings > Developer Settings > API key
+      SYNC_HOURS: 6
+    volumes:
+      - ./data:/data
+
   web:
     image: ghcr.io/dabsy1111/cycleplanner-web:latest
     restart: unless-stopped
     depends_on:
       - brouter
+      - history
     ports:
-      - "8090:80"
+      - "8095:80"

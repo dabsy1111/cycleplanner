@@ -9,6 +9,7 @@
 </head>
 <body>
 <div id="map"></div>
+<div id="wind-badge" hidden><span id="wind-arrow">↑</span> <span id="wind-text"></span></div>
 
 <aside id="panel" class="collapsed">
   <button id="handle" aria-label="Expand panel"><span></span></button>
@@ -55,6 +56,48 @@
       <div id="bd-way" class="breakdown"></div>
     </details>
 
+    <details class="sec" data-key="wind" open>
+      <summary>Wind</summary>
+      <div class="row small">Leaving <input id="wind-time" type="datetime-local"></div>
+      <div id="wind-summary" class="small"></div>
+      <div class="row buttons"><button id="wind-reverse" hidden>Ride it the other way</button></div>
+    </details>
+
+    <details class="sec" data-key="efforts">
+      <summary>Interval stretches</summary>
+      <div class="row small">
+        At least <input id="eff-min" type="number" min="1" max="60" step="1" value="8"> min,
+        <select id="eff-terrain" class="inline">
+          <option value="flat">flat</option>
+          <option value="any">any terrain</option>
+          <option value="climb">climbs</option>
+        </select>
+      </div>
+      <p class="hint">Stretches of this route with no traffic lights, stop or give way signs, roundabouts, barriers or sharp turns. Crossings count when you're on a path.</p>
+      <div id="eff-status" class="small"></div>
+      <ul id="efforts" class="stops"></ul>
+    </details>
+
+    <details class="sec" data-key="loops">
+      <summary>Loop generator</summary>
+      <div class="row small">
+        About <input id="loop-km" type="number" min="5" max="300" step="5" value="50"> km
+        <span id="loop-time"></span>
+      </div>
+      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the routing profile above.</p>
+      <div class="row buttons"><button id="loop-go">Make loops</button></div>
+      <div id="loop-status" class="small"></div>
+      <ul id="loops" class="stops"></ul>
+    </details>
+
+    <details class="sec" data-key="history">
+      <summary>Ride history</summary>
+      <div id="hist-status" class="small">Checking…</div>
+      <label class="check"><input id="hist-show" type="checkbox" checked> Show my rides on the map</label>
+      <div id="hist-new" class="small"></div>
+      <div class="row buttons"><button id="hist-sync">Sync from intervals.icu</button></div>
+    </details>
+
     <details class="sec" data-key="stops">
       <summary>Toilets &amp; water along the route</summary>
       <div class="row small">
@@ -89,6 +132,8 @@
           <option value="none">nothing</option>
           <option value="surface">surface</option>
           <option value="way">way type</option>
+          <option value="wind">wind (red = headwind)</option>
+          <option value="new">new vs ridden roads</option>
         </select>
       </div>
       <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. Tap a point to remove it.</p>
@@ -98,5 +143,9 @@
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="app.js"></script>
+<script src="wind.js"></script>
+<script src="efforts.js"></script>
+<script src="loops.js"></script>
+<script src="history.js"></script>
 </body>
 </html>

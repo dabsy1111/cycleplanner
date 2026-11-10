@@ -4,7 +4,15 @@
 // ---------- config ----------
 const BROUTER_URL = '/brouter';
 const BASE_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+// Map tiles go through the server's cache (nginx /tiles/...), so the map still works if a tile service is down.
+function viaTileCache(url) {
+  if (url.startsWith('https://tiles.openfreemap.org/')) return { url: `${location.origin}/tiles/ofm/${url.slice(30)}` };
+  const m = /^https:\/\/[abc]\.tile-cyclosm\.openstreetmap\.fr\/cyclosm\/(.*)$/.exec(url);
+  if (m) return { url: `${location.origin}/tiles/cyclosm/${m[1]}` };
+  return { url };
+}
+// Our server caches Overpass answers for a week; the public servers are the fallback.
+const OVERPASS = ['/api/overpass', 'https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 const START_VIEW = { center: [115.8605, -31.9505], zoom: 11 }; // Perth
 const POI_MIN_ZOOM = 13;
@@ -125,6 +133,7 @@ let stopsOnRoute = [];     // [{poi, km, off}]
 
 const map = new maplibregl.Map({
   container: 'map', style: BASE_STYLE, ...START_VIEW, attributionControl: { compact: true },
+  transformRequest: viaTileCache,
 });
 map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 map.addControl(new maplibregl.GeolocateControl({ trackUserLocation: false }), 'top-right');
@@ -160,6 +169,10 @@ map.on('load', () => {
     } });
 
   map.on('click', onMapClick);
+  map.on('mousedown', 'route-hit', (e) => startLineDrag(e, e.originalEvent.clientX, e.originalEvent.clientY));
+  map.on('touchstart', 'route-hit', (e) => {
+    if (e.originalEvent.touches.length === 1) startLineDrag(e, e.originalEvent.touches[0].clientX, e.originalEvent.touches[0].clientY);
+  });
   map.on('mouseenter', 'route-hit', () => { map.getCanvas().style.cursor = 'copy'; });
   map.on('mouseleave', 'route-hit', () => { map.getCanvas().style.cursor = ''; });
   map.on('mouseenter', 'pois', () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -177,6 +190,7 @@ function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
 // ---------- map interaction ----------
 const clickHandlers = []; // return true to consume a map click (e.g. placing a no-go area)
 function onMapClick(e) {
+  if (Date.now() < lineDragUntil) return;
   for (const h of clickHandlers) if (h(e)) return;
   const hits = map.queryRenderedFeatures(e.point, { layers: ['pois', 'route-hit'] });
   const poiHit = hits.find((f) => f.layer.id === 'pois');
@@ -189,9 +203,9 @@ function onMapClick(e) {
   }
 }
 
-function insertVia(p) {
-  // Find where on the route the tap was, then which leg that falls in.
-  const ic = nearestIndex(route.coords, [p.lng, p.lat], 0);
+// Insert a via point at `drop`, in the leg of the route nearest `at` (defaults to the same spot).
+function insertVia(p, at = p) {
+  const ic = nearestIndex(route.coords, [at.lng, at.lat], 0);
   const wpIdx = [];
   let from = 0;
   for (const w of waypoints) { from = nearestIndex(route.coords, [w.lng, w.lat], from); wpIdx.push(from); }
@@ -200,6 +214,41 @@ function insertVia(p) {
   const next = [...waypoints];
   next.splice(leg + 1, 0, p);
   setWaypoints(next);
+}
+
+// Grab the route line and pull it: a via point is created where you let go.
+let lineDragUntil = 0; // ignore the click that follows a drag
+function startLineDrag(e, x0, y0) {
+  if (!route || waypoints.length < 2 || clickHandlers.some((h) => h.busy && h.busy())) return;
+  e.preventDefault();
+  const grabbed = { lng: e.lngLat.lng, lat: e.lngLat.lat };
+  const ghost = new maplibregl.Marker({ element: Object.assign(document.createElement('div'), { className: 'wp via ghost' }) });
+  let moved = false;
+  const rect = map.getCanvas().getBoundingClientRect();
+  const move = (cx, cy) => {
+    if (!moved && Math.hypot(cx - x0, cy - y0) < 6) return;
+    if (!moved) { moved = true; ghost.setLngLat(grabbed).addTo(map); }
+    ghost.setLngLat(map.unproject([cx - rect.left, cy - rect.top]));
+  };
+  const onMouse = (ev) => move(ev.clientX, ev.clientY);
+  const onTouch = (ev) => { ev.preventDefault(); move(ev.touches[0].clientX, ev.touches[0].clientY); };
+  const end = () => {
+    window.removeEventListener('mousemove', onMouse);
+    window.removeEventListener('touchmove', onTouch);
+    window.removeEventListener('mouseup', end);
+    window.removeEventListener('touchend', end);
+    map.dragPan.enable();
+    if (!moved) return; // a plain tap: the click handler inserts the point
+    const drop = ghost.getLngLat();
+    ghost.remove();
+    lineDragUntil = Date.now() + 400;
+    insertVia({ lng: drop.lng, lat: drop.lat }, grabbed);
+  };
+  map.dragPan.disable();
+  window.addEventListener('mousemove', onMouse);
+  window.addEventListener('touchmove', onTouch, { passive: false });
+  window.addEventListener('mouseup', end);
+  window.addEventListener('touchend', end);
 }
 
 function nearestIndex(coords, pt, from) {
@@ -266,7 +315,8 @@ const TURN_PENALTY = 60;     // metres per turn
 function brouterUrl(points, profile, stock = false, alt = 0, over = {}) {
   const lonlats = points.map((p) => `${(+p[0]).toFixed(6)},${(+p[1]).toFixed(6)}`).join('|');
   let url = `${BROUTER_URL}?lonlats=${lonlats}&alternativeidx=${alt}&format=geojson`;
-  if (typeof nogoParam === 'function') { const ng = nogoParam(); if (ng) url += `&nogos=${ng}`; }
+  const nogos = [typeof nogoParam === 'function' ? nogoParam() : '', typeof dislikedParam === 'function' ? dislikedParam() : ''].filter(Boolean).join('|');
+  if (nogos) url += `&nogos=${nogos}`;
   url += '&profile=';
   if (stock) return url + encodeURIComponent(profile);
   url += encodeURIComponent('cp-' + profile);
@@ -399,12 +449,16 @@ function fitRoute() {
   map.fitBounds(b, { padding: mobile ? { top: 40, bottom: 260, left: 30, right: 30 } : { top: 40, bottom: 40, left: 400, right: 60 }, maxZoom: 15 });
 }
 
+let modelAvgKmh = null; // average speed from the power model (pace.js), when it's in use
+function speedKmh() { return modelAvgKmh || Math.max(5, +$('speed').value || 27); }
+
 function renderStats() {
   if (!route) { $('s-dist').textContent = '–'; $('s-asc').textContent = '–'; $('s-time').textContent = '–'; return; }
   $('s-dist').textContent = fmtKm(route.length);
   $('s-asc').textContent = Math.round(route.ascend);
-  const speed = Math.max(5, +$('speed').value || 27);
-  $('s-time').textContent = fmtDuration(route.length / 1000 / speed);
+  const model = typeof modelRide === 'function' ? modelRide(route) : null;
+  modelAvgKmh = model ? model.avgKmh : null;
+  $('s-time').textContent = fmtDuration(model ? model.hours : route.length / 1000 / speedKmh());
 }
 
 function renderBreakdown(id, table, cls) {

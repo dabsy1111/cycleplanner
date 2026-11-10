@@ -64,7 +64,7 @@ function windAt(ms) {
   };
 }
 
-function riderSpeedMs() { return Math.max(5, +$('speed').value || 27) / 3.6; }
+function riderSpeedMs() { return speedKmh() / 3.6; }
 
 // Headwind (km/h, + = into the wind) for each ~150 m piece, given departure time and rider speed.
 function windPieces(rt, reversed = false) {
@@ -139,7 +139,7 @@ const uvColour = (u) => UV_COLOURS.find(([lim]) => u < lim)[1];
 
 function rideWindow() {
   const dep = departureMs();
-  const hours = route ? route.length / 1000 / Math.max(5, +$('speed').value || 27) : 1;
+  const hours = route ? route.length / 1000 / speedKmh() : 1;
   return [dep, dep + hours * 3600e3];
 }
 
@@ -255,6 +255,7 @@ async function refreshWind() {
   const c = route ? route.coords[Math.floor(route.coords.length / 2)] : [map.getCenter().lng, map.getCenter().lat];
   try { await loadWind(c[0], c[1]); } catch (e) { console.warn(e); }
   renderWind();
+  if (typeof modelRide === 'function') renderStats(); // ride time uses the wind
   drawWeather();
   $('wx-sum').textContent = rideWeatherSummary();
   if ($('colour-by').value === 'wind') refreshRouteColours();

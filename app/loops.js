@@ -42,6 +42,14 @@ out skel geom;`);
   pathIndex = { key, cells };
   return pathIndex;
 }
+function addLikedToPathIndex() {
+  if (!pathIndex || typeof likedVertices !== 'function') return;
+  for (const [lng, lat] of likedVertices()) {
+    const ck = `${Math.floor(lng / SNAP_CELL)}:${Math.floor(lat / SNAP_CELL)}`;
+    if (!pathIndex.cells.has(ck)) pathIndex.cells.set(ck, []);
+    pathIndex.cells.get(ck).push([lng, lat]);
+  }
+}
 function snapPoint(p, maxM = 600) {
   if (!pathIndex) return p;
   const cx = Math.floor(p[0] / SNAP_CELL), cy = Math.floor(p[1] / SNAP_CELL);
@@ -136,6 +144,7 @@ function loopScore(l) {
   if (nov !== 'off' && l.newPct != null) s += (nov === 'new' ? -1 : 1) * l.newPct * 0.3;
   if (l.wind) s += l.wind.second * 0.5;
   if (l.interval) s -= Math.min(l.interval.mins, 30) * 0.5;
+  if (lp('lp-liked') && l.liked) s -= l.liked.pct * 0.3;
   return s;
 }
 
@@ -167,6 +176,7 @@ function renderLoops() {
     if (l.repeat >= 3) bits.push(`${Math.round(l.repeat)}% repeated`);
     if (l.newPct != null) bits.push(`${Math.round(l.newPct)}% new`);
     if (l.interval) bits.push(`${l.interval.mins} min stretch`);
+    if (l.liked && l.liked.pct >= 1) bits.push(`${Math.round(l.liked.pct)}% liked roads`);
     li.innerHTML = `<span class="km">${fmtKm(l.rt.length)}</span>` +
       `<span>${k === 0 ? '<span class="tag">best match</span> ' : ''}Heads ${compass(l.brg)} · ${bits.join(' · ')}</span>` +
       `<span class="off">${l.wind ? fmtWind(l.wind.second).replace('wind', 'wind home') : ''}</span>`;
@@ -201,7 +211,8 @@ async function generateLoops() {
     try { await loadWind(start[0], start[1]); } catch { /* wind is optional */ }
     if (lp('lp-snap')) {
       st.textContent = 'Looking up bike paths…';
-      try { await loadPathIndex(start, target / (2 * Math.PI)); } catch { pathIndex = null; }
+      try { await loadPathIndex(start, target / (2 * Math.PI)); } catch { pathIndex = { key: '', cells: new Map() }; }
+      if (lp('lp-liked')) addLikedToPathIndex();
     }
     const bearings = lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
     const found = [];
@@ -233,6 +244,7 @@ async function generateLoops() {
     for (const l of found) {
       l.mainPct = mainRoadPct(l.rt);
       l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
+      l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
     }
     let list = found;
     let note = '';
@@ -269,7 +281,7 @@ async function generateLoops() {
 
 function updateLoopTime() {
   const km = +$('loop-km').value || 0;
-  $('loop-time').textContent = km ? `(about ${fmtDuration(km / Math.max(5, +$('speed').value || 27))})` : '';
+  $('loop-time').textContent = km ? `(about ${fmtDuration(km / speedKmh())})` : '';
 }
 
 map.on('load', () => {
@@ -287,7 +299,7 @@ map.on('load', () => {
 });
 
 // Remember the loop switches.
-for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval']) {
+for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked']) {
   $(id).checked = store.get('cp.' + id, $(id).checked);
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).checked));
 }

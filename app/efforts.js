@@ -74,7 +74,15 @@ function interruptions(rt, nodes) {
     }
     i++;
   }
-  return out.sort((x, y) => x.at - y.at);
+  // One intersection often has several signal or crossing points mapped: count it once.
+  out.sort((x, y) => x.at - y.at);
+  const merged = [];
+  for (const x of out) {
+    const last = merged[merged.length - 1];
+    if (last && x.at - last.at < 40) { if (x.kind === 'lights') last.kind = 'lights'; continue; }
+    merged.push({ ...x });
+  }
+  return merged;
 }
 
 function eleAt(rt, m) {

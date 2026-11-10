@@ -46,7 +46,10 @@
   <div id="stats" class="row stats">
     <div><b id="s-dist">–</b><small>km</small></div>
     <div><b id="s-asc">–</b><small>m up</small></div>
-    <div><b id="s-time">–</b><small>at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</small></div>
+    <div><b id="s-time">–</b><small>
+      <span id="pace-flat">at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</span>
+      <span id="pace-power" hidden>at <input id="pace-pct" type="number" min="30" max="120" step="5" value="65">% FTP</span>
+      <button id="pace-switch" class="linkbtn" hidden title="Switch between a flat speed and your power">use FTP</button></small></div>
   </div>
   <div id="msg" class="row msg" hidden></div>
 
@@ -71,6 +74,14 @@
       </div>
       <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
       <ul id="nogos" class="stops"></ul>
+    </details>
+
+    <details class="sec" data-key="roads">
+      <summary>Roads I like &amp; dislike</summary>
+      <p class="hint">Tap a button, then tap a road on the map. It marks that road up to about 2 km either way. Disliked roads are avoided unless the way around is much longer (a 200 m detour round Roe Street: avoided; a 7 km detour round the Narrows: still used). Liked roads can't pull the router onto them, but the loop generator favours them and snaps loop points onto them, and you'll see how much of each route uses them.</p>
+      <div class="row buttons"><button id="road-like">Mark a road I like</button><button id="road-dislike">Mark a road I dislike</button></div>
+      <div id="road-sum" class="small"></div>
+      <ul id="roads" class="stops"></ul>
     </details>
 
     <details class="sec" data-key="elev" open>
@@ -137,6 +148,8 @@
           <span><b>Quieter roads</b><small>Routes the loops with "avoid busy roads" on, whatever the setting above, and ranks loops with less main road first.</small></span></label>
         <label class="opt"><input id="lp-snap" type="checkbox">
           <span><b>Snap points to bike paths</b><small>Moves each loop waypoint onto the nearest bike or shared path within 600 m, so loops are built from paths instead of random suburban streets. Slower: looks up paths in OpenStreetMap first.</small></span></label>
+        <label class="opt"><input id="lp-liked" type="checkbox" checked>
+          <span><b>Favour roads I like</b><small>Ranks loops that use more of your liked roads higher, and lets "snap points" use liked roads as well as bike paths.</small></span></label>
         <label class="opt"><input id="lp-climb" type="checkbox">
           <span><b>Climbing target</b><small>Makes more loops and ranks them by how close they come to this much climbing. In Perth, bigger targets pull loops towards the hills.</small></span></label>
         <div class="row small">About <input id="lp-climb-m" type="number" min="50" max="3000" step="50" value="400"> m of climbing</div>
@@ -190,6 +203,8 @@
       </div>
       <div id="saved-status" class="small"></div>
       <ul id="saved" class="saved"></ul>
+      <div class="row buttons"><label class="filebtn">Import GPX to edit<input id="gpx-import" type="file" accept=".gpx,application/gpx+xml" hidden></label></div>
+      <div id="import-status" class="small"></div>
     </details>
 
     <details class="sec" data-key="map" open>
@@ -226,5 +241,8 @@
 <script src="climbs.js"></script>
 <script src="safety.js"></script>
 <script src="alternatives.js"></script>
+<script src="pace.js"></script>
+<script src="roads.js"></script>
+<script src="gpximport.js"></script>
 </body>
 </html>

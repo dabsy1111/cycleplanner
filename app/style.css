@@ -158,3 +158,11 @@ body.placing #map canvas { cursor: crosshair !important; }
 #wx { width: 100%; height: 156px; display: block; touch-action: none; }
 #wx-tip { position: absolute; top: 2px; padding: 2px 6px; font-size: 11.5px; background: rgba(29,33,37,.88); color: #fff; border-radius: 4px; pointer-events: none; white-space: nowrap; transform: translateX(-50%); }
 .wx-legend { font-size: 11px; margin-bottom: 4px; }
+
+.linkbtn { border: 0; background: none; color: #1971c2; padding: 0 0 0 4px; cursor: pointer; font-size: 12px; }
+
+.wp.ghost { opacity: .75; border-color: #d6336c; pointer-events: none; }
+
+.filebtn { flex: 1; padding: 7px 6px; border: 1px solid var(--line); background: #f8f9fa; border-radius: 7px; cursor: pointer; text-align: center; }
+.badge.like { background: #d3f9d8; color: #2b8a3e; }
+.badge.dislike { background: #ffe3e3; color: #c92a2a; }

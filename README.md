@@ -40,6 +40,22 @@ Two more switches live in **Route options**: "fewer traffic lights" (each light 
 
 **No-go areas** are BRouter `nogos` circles. "Avoid completely" never enters; "prefer to avoid" uses a weight of 10 (cost per metre ridden inside). They're stored on the server in `data/settings.json`.
 
+## Ride time from your power
+
+With the history service connected, the app reads your ride FTP and weight from intervals.icu and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). Tap "use speed" to go back to a flat km/h.
+
+## Roads you like and dislike
+
+Tap "Mark a road I dislike" (or like), then tap the road on the map; the road is followed up to about 2 km each way. Disliked roads go to BRouter as a chain of small soft no-go circles, so they're avoided unless the way round is much longer. Liked roads are favoured by the loop generator (ranking and snapping). Stored on the server in `data/settings.json`.
+
+## GPX import
+
+"Import GPX to edit" turns a track into waypoints the router can follow (shape points, no gap over 1.5 km), shows the original in grey and says how much of it the new route follows.
+
+## Caching
+
+Map tiles (OpenFreeMap, CyclOSM) go through an nginx cache inside the web container: 30 days for tiles, an hour for the style, and stale tiles are served if the tile service is down. Overpass lookups (toilets, water, cafés, lights, paths) go through the history service and are kept for a week in `data/overpass/`, with old answers used if every Overpass server fails. The first lookup for a new area can take a minute.
+
 ## Saved routes and short links
 
 Routes are saved on the server in `data/routes/`, so every device sees the same list. "Copy short link" stores the route and gives a `#r=abc123` link. Routes saved in a browser before this existed are moved to the server the first time that browser opens the app.

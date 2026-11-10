@@ -18,6 +18,7 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -400,6 +401,69 @@ def settings_put(key, value):
         _write_json(SETTINGS, s)
 
 
+# ---------- athlete (FTP and weight for ride-time estimates) ----------
+athlete_cache = {"at": 0, "data": None}
+
+
+def athlete_info():
+    if not API_KEY:
+        return None
+    if athlete_cache["data"] and time.time() - athlete_cache["at"] < 6 * 3600:
+        return athlete_cache["data"]
+    a = api(f"/api/v1/athlete/{ATHLETE}")
+    weight = a.get("icu_weight") or a.get("weight")
+    ftp = None
+    for s in a.get("sportSettings") or []:
+        if "Ride" in (s.get("types") or []):
+            ftp = s.get("ftp") or s.get("indoor_ftp")
+            break
+    data = {"ftp": ftp, "weight": weight}
+    athlete_cache.update(at=time.time(), data=data)
+    return data
+
+
+# ---------- Overpass proxy with a disk cache ----------
+# Toilets, water, cafés, lights and paths change slowly: answers are kept for a week, and an
+# old answer is served if every Overpass server is down or rate-limiting.
+OVERPASS_URLS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter",
+                 "https://maps.mail.ru/osm/tools/overpass/api/interpreter"]
+OVERPASS_CACHE = os.path.join(os.environ.get("DATA_DIR", "/data"), "overpass")
+OVERPASS_TTL = 7 * 86400
+
+
+def overpass_query(q):
+    import hashlib
+    os.makedirs(OVERPASS_CACHE, exist_ok=True)
+    path = os.path.join(OVERPASS_CACHE, hashlib.sha256(q.encode()).hexdigest()[:32] + ".json")
+    try:
+        if time.time() - os.stat(path).st_mtime < OVERPASS_TTL:
+            with open(path, "rb") as f:
+                return f.read(), "hit"
+    except OSError:
+        pass
+    data = urllib.parse.urlencode({"data": q}).encode()
+    last = None
+    for url in OVERPASS_URLS:
+        try:
+            req = urllib.request.Request(url, data=data, headers={
+                "User-Agent": "cycleplanner/1.0 (+https://github.com/dabsy1111/cycleplanner)",
+                "Content-Type": "application/x-www-form-urlencoded"})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                body = r.read()
+            json.loads(body)  # only cache real answers
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(body)
+            os.replace(tmp, path)
+            return body, "miss"
+        except Exception as e:
+            last = e
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return f.read(), "stale"
+    raise RuntimeError(f"Overpass unavailable: {last}")
+
+
 def scheduler():
     if not API_KEY:
         return
@@ -429,6 +493,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0].rstrip("/")
         if path == "/api/routes":
             self.send(200, json.dumps(route_list()).encode())
+        elif path == "/api/athlete":
+            try:
+                info = athlete_info()
+            except Exception as e:
+                self.send(502, json.dumps({"error": str(e)[:200]}).encode())
+                return
+            self.send(200 if info else 404, json.dumps(info or {"error": "ICU_API_KEY not set"}).encode())
         elif path.startswith("/api/routes/"):
             r = route_get(path.rsplit("/", 1)[1])
             self.send(200 if r else 404, json.dumps(r or {"error": "not found"}).encode())
@@ -466,6 +537,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path.split("?")[0].rstrip("/") == "/api/overpass":
+            n = int(self.headers.get("Content-Length") or 0)
+            form = urllib.parse.parse_qs(self.rfile.read(min(n, 100_000)).decode())
+            q = (form.get("data") or [""])[0]
+            if not q:
+                self.send(400, b'{"error":"no query"}')
+                return
+            try:
+                body, state = overpass_query(q)
+            except RuntimeError as e:
+                self.send(502, json.dumps({"error": str(e)[:300]}).encode())
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-Cache", state)
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/routes":
             try:
                 rec = route_create(self.body_json())

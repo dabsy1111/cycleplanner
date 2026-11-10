@@ -63,13 +63,15 @@ function setPlacing(on) {
   $('nogo-add').textContent = on ? 'Tap the map to place it (tap here to cancel)' : 'Add area: tap the map';
 }
 
-clickHandlers.push((e) => {
+const nogoClick = (e) => {
   if (!placingNogo) return false;
   nogoAreas.push({ lng: e.lngLat.lng, lat: e.lngLat.lat, r: +$('nogo-radius').value, mode: $('nogo-mode').value });
   setPlacing(false);
   saveNogos();
   return true;
-});
+};
+nogoClick.busy = () => placingNogo;
+clickHandlers.push(nogoClick);
 
 $('nogo-add').onclick = () => setPlacing(!placingNogo);
 

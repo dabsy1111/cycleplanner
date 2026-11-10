@@ -10,8 +10,12 @@ const cellKey = (lng, lat) => `${Math.floor(lng / CELL_LNG)}:${Math.floor(lat / 
 
 function buildIndex(fc) {
   const set = new Set();
+  const lines = [];
   for (const f of fc.features) {
-    const c = f.geometry.coordinates;
+    if (f.geometry.type === 'MultiLineString') lines.push(...f.geometry.coordinates);
+    else lines.push(f.geometry.coordinates);
+  }
+  for (const c of lines) {
     for (let i = 1; i < c.length; i++) {
       const steps = Math.max(1, Math.ceil(haversine(c[i - 1], c[i]) / 10));
       for (let k = 0; k <= steps; k++) {

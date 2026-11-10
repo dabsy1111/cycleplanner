@@ -34,7 +34,6 @@ RIDE_TYPES = {"Ride", "GravelRide", "MountainBikeRide", "EBikeRide", "EMountainB
 
 lock = threading.Lock()
 status = {"syncing": False, "progress": "", "error": None, "last_sync": None}
-tracks_cache = {"mtime": None, "body": b'{"type":"FeatureCollection","features":[]}'}
 
 
 def api(path):
@@ -165,6 +164,7 @@ def sync():
         state["last_sync"] = time.time()
         save_state(state)
         status["last_sync"] = state["last_sync"]
+        update_network()
     except Exception as e:  # report and carry on; the next sync retries
         status["error"] = str(e)[:200]
     finally:
@@ -178,26 +178,130 @@ def ride_count():
         return 0
 
 
-def tracks_body():
-    try:
-        mtime = os.stat(TRACKS).st_mtime
-    except OSError:
-        return tracks_cache["body"]
-    if mtime != tracks_cache["mtime"]:
-        feats = []
-        for fn in sorted(os.listdir(TRACKS)):
-            if not fn.endswith(".json"):
-                continue
+# ---------- merged "ridden roads" network ----------
+# Every road you've ridden is stored once: a ride only adds the parts that aren't
+# already within ~15 m of something ridden before. 750 overlapping rides become one layer.
+NETWORK = os.path.join(DATA, "network.json")
+NETWORK_VERSION = 1
+CELL_LAT, CELL_LNG = 0.0001, 0.000118  # ~11 m cells around Perth
+net = {"rides": set(), "lines": [], "cells": set(), "body": None}
+net_lock = threading.Lock()
+
+
+def _cell(lng, lat):
+    return (int(math.floor(lng / CELL_LNG)), int(math.floor(lat / CELL_LAT)))
+
+
+def _covered(lng, lat):
+    cx, cy = _cell(lng, lat)
+    cells = net["cells"]
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if (cx + dx, cy + dy) in cells:
+                return True
+    return False
+
+
+def _densify(coords, step=8.0):
+    out = []
+    for i, (lng, lat) in enumerate(coords):
+        if i:
+            plng, plat = coords[i - 1]
+            d = math.hypot((lng - plng) * 111320 * math.cos(math.radians(lat)), (lat - plat) * 110574)
+            n = int(d // step)
+            for k in range(1, n + 1):
+                t = k / (n + 1)
+                out.append((plng + t * (lng - plng), plat + t * (lat - plat)))
+        out.append((lng, lat))
+    return out
+
+
+def _mark(coords):
+    for lng, lat in _densify(coords):
+        net["cells"].add(_cell(lng, lat))
+
+
+def _add_ride(coords):
+    pts = _densify(coords)
+    pending = []      # this ride's own points, marked once we're 40 m past them
+    seg, new_lines = [], []
+    travelled = 0.0
+    for i, (lng, lat) in enumerate(pts):
+        if i:
+            plng, plat = pts[i - 1]
+            travelled += math.hypot((lng - plng) * 111320 * math.cos(math.radians(lat)), (lat - plat) * 110574)
+        while pending and travelled - pending[0][0] > 40:
+            net["cells"].add(_cell(*pending.pop(0)[1]))
+        if _covered(lng, lat):
+            if seg:
+                seg.append((lng, lat))  # join onto the road already ridden
+                if len(seg) >= 3:
+                    new_lines.append(seg)
+                seg = []
+        else:
+            if not seg and i:
+                seg.append(pts[i - 1])
+            seg.append((lng, lat))
+        pending.append((travelled, (lng, lat)))
+    if len(seg) >= 2:
+        new_lines.append(seg)
+    for _, p in pending:
+        net["cells"].add(_cell(*p))
+    for line in new_lines:
+        simple = rdp([(round(a, 5), round(b, 5)) for a, b in line])
+        if len(simple) >= 2:
+            net["lines"].append(simple)
+
+
+def _save_network():
+    tmp = NETWORK + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"version": NETWORK_VERSION, "rides": sorted(net["rides"]), "lines": net["lines"]}, f,
+                  separators=(",", ":"))
+    os.replace(tmp, NETWORK)
+
+
+def update_network():
+    """Add any synced rides that aren't in the network yet (all of them on the first run)."""
+    with net_lock:
+        if not net["rides"] and os.path.exists(NETWORK):
+            try:
+                with open(NETWORK) as f:
+                    saved = json.load(f)
+                if saved.get("version") == NETWORK_VERSION:
+                    net["rides"] = set(saved["rides"])
+                    net["lines"] = saved["lines"]
+                    for line in net["lines"]:
+                        _mark(line)
+            except (OSError, ValueError, KeyError):
+                pass
+        try:
+            files = sorted(f for f in os.listdir(TRACKS) if f.endswith(".json"))
+        except OSError:
+            files = []
+        todo = [f for f in files if f[:-5] not in net["rides"]]
+        for n, fn in enumerate(todo, 1):
+            status["progress"] = f"merging rides into one layer, {n} of {len(todo)}"
             try:
                 with open(os.path.join(TRACKS, fn)) as f:
-                    r = json.load(f)
-            except (OSError, ValueError):
-                continue
-            feats.append({"type": "Feature", "properties": {"id": r["id"], "name": r["name"], "date": r["date"]},
-                          "geometry": {"type": "LineString", "coordinates": rdp(r["coords"])}})
-        tracks_cache.update(mtime=mtime, body=json.dumps({"type": "FeatureCollection", "features": feats},
-                                                         separators=(",", ":")).encode())
-    return tracks_cache["body"]
+                    _add_ride([tuple(c) for c in json.load(f)["coords"]])
+            except (OSError, ValueError, KeyError):
+                pass
+            net["rides"].add(fn[:-5])
+        if todo or net["body"] is None:
+            if todo:
+                _save_network()
+            net["body"] = json.dumps({"type": "FeatureCollection", "features": [{
+                "type": "Feature", "properties": {"rides": len(net["rides"])},
+                "geometry": {"type": "MultiLineString", "coordinates": net["lines"]}}]},
+                separators=(",", ":")).encode()
+        status["progress"] = ""
+
+
+def tracks_body():
+    if net["body"] is None:
+        update_network()
+    return net["body"]
 
 
 def scheduler():
@@ -247,6 +351,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.makedirs(TRACKS, exist_ok=True)
+    threading.Thread(target=update_network, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     print(f"History service on :8000 ({'connected to intervals.icu' if API_KEY else 'no ICU_API_KEY set'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()

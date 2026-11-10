@@ -98,10 +98,18 @@ map.on('load', () => {
   map.addSource('history', { type: 'geojson', data: emptyFC() });
   map.addLayer({ id: 'history', type: 'line', source: 'history',
     layout: { 'line-join': 'round', 'line-cap': 'round', visibility: store.get('cp.hist', true) ? 'visible' : 'none' },
-    paint: { 'line-color': '#f76707', 'line-opacity': 0.35, 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 16, 4] } }, 'route-casing');
+    paint: { 'line-color': '#1f2f5c', 'line-opacity': histOpacity(), 'line-width': ['interpolate', ['linear'], ['zoom'], 10, 1.5, 16, 4] } }, 'route-casing');
   checkHistory(true);
 });
 
+function histOpacity() { return (+$('hist-opacity').value || 45) / 100; }
+$('hist-opacity').value = store.get('cp.histop', 45);
+$('hist-opacity').addEventListener('input', () => {
+  store.set('cp.histop', +$('hist-opacity').value);
+  $('hist-opacity-val').textContent = `${$('hist-opacity').value}%`;
+  if (map.getLayer('history')) map.setPaintProperty('history', 'line-opacity', histOpacity());
+});
+$('hist-opacity-val').textContent = `${$('hist-opacity').value}%`;
 $('hist-show').checked = store.get('cp.hist', true);
 $('hist-show').onchange = (e) => {
   store.set('cp.hist', e.target.checked);

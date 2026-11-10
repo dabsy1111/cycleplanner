@@ -304,6 +304,102 @@ def tracks_body():
     return net["body"]
 
 
+# ---------- saved routes, short links and shared settings ----------
+ROUTES = os.path.join(os.environ.get("DATA_DIR", "/data"), "routes")
+SETTINGS = os.path.join(os.environ.get("DATA_DIR", "/data"), "settings.json")
+routes_lock = threading.Lock()
+ID_CHARS = "abcdefghijkmnpqrstuvwxyz23456789"  # no lookalikes (l/1, o/0)
+
+
+def _new_id():
+    import secrets
+    while True:
+        rid = "".join(secrets.choice(ID_CHARS) for _ in range(6))
+        if not os.path.exists(os.path.join(ROUTES, rid + ".json")):
+            return rid
+
+
+def _write_json(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, separators=(",", ":"))
+    os.replace(tmp, path)
+
+
+def route_list():
+    out = []
+    try:
+        names = os.listdir(ROUTES)
+    except OSError:
+        return out
+    for fn in names:
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(ROUTES, fn)) as f:
+                r = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if r.get("saved"):
+            out.append({k: r.get(k) for k in ("id", "name", "km", "profile", "created")})
+    return sorted(out, key=lambda r: r.get("created") or 0, reverse=True)
+
+
+def route_create(body):
+    wp = body.get("wp")
+    if not isinstance(wp, list) or len(wp) < 2 or len(wp) > 200:
+        raise ValueError("a route needs 2-200 waypoints")
+    rec = {
+        "id": _new_id(), "created": time.time(),
+        "name": str(body.get("name") or "")[:120], "saved": bool(body.get("saved")),
+        "profile": str(body.get("profile") or "fastbike")[:40],
+        "km": body.get("km"), "options": body.get("options") if isinstance(body.get("options"), dict) else {},
+        "wp": [{"lng": float(p["lng"]), "lat": float(p["lat"])} for p in wp],
+    }
+    with routes_lock:
+        os.makedirs(ROUTES, exist_ok=True)
+        # Saving under an existing name replaces that route.
+        if rec["saved"]:
+            for old in route_list():
+                if old["name"] == rec["name"]:
+                    rec["id"] = old["id"]
+        _write_json(os.path.join(ROUTES, rec["id"] + ".json"), rec)
+    return rec
+
+
+def route_get(rid):
+    if not rid.isalnum():
+        return None
+    try:
+        with open(os.path.join(ROUTES, rid + ".json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def route_delete(rid):
+    if rid.isalnum():
+        try:
+            os.remove(os.path.join(ROUTES, rid + ".json"))
+        except OSError:
+            pass
+
+
+def settings_get():
+    try:
+        with open(SETTINGS) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def settings_put(key, value):
+    with routes_lock:
+        s = settings_get()
+        s[key] = value
+        _write_json(SETTINGS, s)
+
+
 def scheduler():
     if not API_KEY:
         return
@@ -323,9 +419,23 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def body_json(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > 2_000_000:
+            raise ValueError("too large")
+        return json.loads(self.rfile.read(n) or b"{}")
+
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/")
-        if path == "/api/history/status":
+        if path == "/api/routes":
+            self.send(200, json.dumps(route_list()).encode())
+        elif path.startswith("/api/routes/"):
+            r = route_get(path.rsplit("/", 1)[1])
+            self.send(200 if r else 404, json.dumps(r or {"error": "not found"}).encode())
+        elif path.startswith("/api/settings/"):
+            key = path.rsplit("/", 1)[1]
+            self.send(200, json.dumps(settings_get().get(key)).encode())
+        elif path == "/api/history/status":
             if status["last_sync"] is None:
                 status["last_sync"] = load_state().get("last_sync")
             body = {"configured": bool(API_KEY), "rides": ride_count(), **status}
@@ -335,7 +445,35 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send(404, b'{"error":"not found"}')
 
+    def do_DELETE(self):
+        path = self.path.split("?")[0].rstrip("/")
+        if path.startswith("/api/routes/"):
+            route_delete(path.rsplit("/", 1)[1])
+            self.send(204, b"")
+        else:
+            self.send(404, b'{"error":"not found"}')
+
+    def do_PUT(self):
+        path = self.path.split("?")[0].rstrip("/")
+        if path.startswith("/api/settings/"):
+            try:
+                settings_put(path.rsplit("/", 1)[1][:40], self.body_json())
+            except ValueError as e:
+                self.send(400, json.dumps({"error": str(e)}).encode())
+                return
+            self.send(204, b"")
+        else:
+            self.send(404, b'{"error":"not found"}')
+
     def do_POST(self):
+        if self.path.split("?")[0].rstrip("/") == "/api/routes":
+            try:
+                rec = route_create(self.body_json())
+            except (ValueError, KeyError, TypeError) as e:
+                self.send(400, json.dumps({"error": str(e)}).encode())
+                return
+            self.send(201, json.dumps(rec).encode())
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/history/sync":
             if not API_KEY:
                 self.send(400, b'{"error":"ICU_API_KEY is not set"}')

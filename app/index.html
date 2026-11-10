@@ -51,9 +51,37 @@
   <div id="msg" class="row msg" hidden></div>
 
   <div class="scroll">
+    <details class="sec" data-key="ropts" open>
+      <summary>Route options</summary>
+      <label class="opt"><input id="opt-lights" type="checkbox">
+        <span><b>Fewer traffic lights</b><small>Treats every set of lights as worth a 300 m detour, and stop or give way signs as 100 m. Good for training rides where stopping wrecks an effort. Routes get a little longer.</small></span></label>
+      <label class="opt"><input id="opt-turns" type="checkbox">
+        <span><b>Fewer turns</b><small>Adds a cost to every turn, so the route sticks to fewer, longer roads instead of zigzagging through side streets. Easier to follow without looking at the screen.</small></span></label>
+      <label class="opt"><input id="opt-alts" type="checkbox">
+        <span><b>Show alternatives</b><small>For A-to-B routes, asks the router for up to three other ways and draws them in grey. Tap one in the list to ride it instead.</small></span></label>
+      <ul id="alts" class="stops"></ul>
+    </details>
+
+    <details class="sec" data-key="nogo">
+      <summary>No-go areas</summary>
+      <p class="hint">Circles the router stays out of, like a nasty intersection or a road you hate. "Avoid completely" never enters; "prefer to avoid" goes around unless the detour is more than about ten times the distance inside the circle. Saved on the server, so they apply on every device.</p>
+      <div class="row small">
+        Size <select id="nogo-radius" class="inline"><option value="60">small (60 m)</option><option value="150" selected>medium (150 m)</option><option value="400">large (400 m)</option></select>
+        <select id="nogo-mode" class="inline"><option value="hard">avoid completely</option><option value="soft">prefer to avoid</option></select>
+      </div>
+      <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
+      <ul id="nogos" class="stops"></ul>
+    </details>
+
     <details class="sec" data-key="elev" open>
       <summary>Elevation</summary>
       <div class="elev-wrap"><canvas id="elev"></canvas><div id="elev-tip" hidden></div></div>
+    </details>
+
+    <details class="sec" data-key="climbs">
+      <summary>Climbs</summary>
+      <p class="hint">Climbs of at least 15 m gain averaging 3% or more. The elevation line is coloured by gradient: grey flat, yellow 3–6%, orange 6–9%, red 9%+, blue downhill.</p>
+      <ul id="climbs" class="stops"></ul>
     </details>
 
     <details class="sec" data-key="surface" open>
@@ -61,6 +89,13 @@
       <div id="bd-surface" class="breakdown"></div>
       <h3>Way type</h3>
       <div id="bd-way" class="breakdown"></div>
+    </details>
+
+    <details class="sec" data-key="safety">
+      <summary>Road safety</summary>
+      <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it.</p>
+      <div id="safety-sum" class="small"></div>
+      <ul id="safety" class="stops"></ul>
     </details>
 
     <details class="sec" data-key="wind" open>
@@ -91,7 +126,24 @@
         About <input id="loop-km" type="number" min="5" max="300" step="5" value="50"> km
         <span id="loop-time"></span>
       </div>
-      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the routing profile above.</p>
+      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, footpath, traffic and route options above, and is ridden whichever way gives a tailwind home.</p>
+      <div class="loopopts">
+        <label class="opt"><input id="lp-noback" type="checkbox" checked>
+          <span><b>Don't double back</b><small>Rejects loops that ride the same road twice (out-and-back spurs) and tries again with shifted waypoints. Each loop shows how much of it repeats.</small></span></label>
+        <label class="opt"><input id="lp-quiet" type="checkbox" checked>
+          <span><b>Quieter roads</b><small>Routes the loops with "avoid busy roads" on, whatever the setting above, and ranks loops with less main road first.</small></span></label>
+        <label class="opt"><input id="lp-snap" type="checkbox">
+          <span><b>Snap points to bike paths</b><small>Moves each loop waypoint onto the nearest bike or shared path within 600 m, so loops are built from paths instead of random suburban streets. Slower: looks up paths in OpenStreetMap first.</small></span></label>
+        <label class="opt"><input id="lp-climb" type="checkbox">
+          <span><b>Climbing target</b><small>Makes more loops and ranks them by how close they come to this much climbing. In Perth, bigger targets pull loops towards the hills.</small></span></label>
+        <div class="row small">About <input id="lp-climb-m" type="number" min="50" max="3000" step="50" value="400"> m of climbing</div>
+        <label class="opt"><input id="lp-interval" type="checkbox">
+          <span><b>Include an interval stretch</b><small>Only shows loops with at least one uninterrupted stretch this long (no lights, stop signs, roundabouts or sharp turns), and highlights it. Uses the interval stretch finder's rules.</small></span></label>
+        <div class="row small">At least <input id="lp-interval-min" type="number" min="2" max="60" step="1" value="8"> min</div>
+        <label class="opt"><span style="width:13px"></span>
+          <span><b>Roads I've ridden</b><small>Uses your intervals.icu ride history to rank loops.</small>
+          <select id="lp-novelty" class="inline"><option value="off">don't mind</option><option value="new">favour new roads</option><option value="familiar">favour familiar roads</option></select></span></label>
+      </div>
       <div class="row buttons"><button id="loop-go">Make loops</button></div>
       <div id="loop-status" class="small"></div>
       <ul id="loops" class="stops"></ul>
@@ -124,9 +176,11 @@
       <label class="check"><input id="gpx-wpt" type="checkbox"> Put toilets &amp; water in the GPX as waypoints</label>
       <div class="row buttons">
         <button id="gpx">Download GPX</button>
+        <button id="gpx-share" hidden>Share GPX</button>
         <button id="save">Save</button>
-        <button id="share">Copy link</button>
+        <button id="share">Copy short link</button>
       </div>
+      <div id="saved-status" class="small"></div>
       <ul id="saved" class="saved"></ul>
     </details>
 
@@ -159,5 +213,10 @@
 <script src="efforts.js"></script>
 <script src="loops.js"></script>
 <script src="history.js"></script>
+<script src="routes.js"></script>
+<script src="nogo.js"></script>
+<script src="climbs.js"></script>
+<script src="safety.js"></script>
+<script src="alternatives.js"></script>
 </body>
 </html>

@@ -115,6 +115,7 @@ function routePieces(rt, step = 150) {
 let waypoints = [];        // [{lng, lat}]
 let markers = [];
 let undoStack = [];
+let altIndex = 0;          // which BRouter alternative (0 = best) for A-to-B routes
 let route = null;          // {coords, cum, length, ascend, segs:[{i0,i1,tags}]}
 let routeAbort = null;
 let routeSeq = 0;
@@ -174,7 +175,9 @@ map.on('load', () => {
 function emptyFC() { return { type: 'FeatureCollection', features: [] }; }
 
 // ---------- map interaction ----------
+const clickHandlers = []; // return true to consume a map click (e.g. placing a no-go area)
 function onMapClick(e) {
+  for (const h of clickHandlers) if (h(e)) return;
   const hits = map.queryRenderedFeatures(e.point, { layers: ['pois', 'route-hit'] });
   const poiHit = hits.find((f) => f.layer.id === 'pois');
   if (poiHit) { showPoiPopup(pois.get(poiHit.properties.id)); return; }
@@ -212,6 +215,7 @@ function setWaypoints(next, { fit = false, record = true } = {}) {
   if (record) undoStack.push(waypoints.map((w) => ({ ...w })));
   if (undoStack.length > 100) undoStack.shift();
   waypoints = next.map((w) => ({ lng: +w.lng, lat: +w.lat }));
+  altIndex = 0;
   renderMarkers();
   writeHash();
   requestRoute(fit);
@@ -256,19 +260,26 @@ const TRAFFIC_PARAM = {
 };
 let patchedProfilesBroken = false;
 
-function brouterUrl(points, profile, stock = false) {
+const SIGNAL_PENALTY = 300; // metres of detour a traffic light is worth avoiding
+const TURN_PENALTY = 60;     // metres per turn
+
+function brouterUrl(points, profile, stock = false, alt = 0, over = {}) {
   const lonlats = points.map((p) => `${(+p[0]).toFixed(6)},${(+p[1]).toFixed(6)}`).join('|');
-  let url = `${BROUTER_URL}?lonlats=${lonlats}&alternativeidx=0&format=geojson&profile=`;
+  let url = `${BROUTER_URL}?lonlats=${lonlats}&alternativeidx=${alt}&format=geojson`;
+  if (typeof nogoParam === 'function') { const ng = nogoParam(); if (ng) url += `&nogos=${ng}`; }
+  url += '&profile=';
   if (stock) return url + encodeURIComponent(profile);
   url += encodeURIComponent('cp-' + profile);
   url += `&profile:avoid_footpaths=${$('opt-footpaths').checked ? 1 : 0}`;
-  if ($('opt-traffic').value === 'avoid' && TRAFFIC_PARAM[profile]) url += `&profile:${TRAFFIC_PARAM[profile][0]}=${TRAFFIC_PARAM[profile][1]}`;
+  if ((over.traffic ?? $('opt-traffic').value) === 'avoid' && TRAFFIC_PARAM[profile]) url += `&profile:${TRAFFIC_PARAM[profile][0]}=${TRAFFIC_PARAM[profile][1]}`;
+  if ($('opt-lights').checked) url += `&profile:signal_penalty=${SIGNAL_PENALTY}`;
+  if ($('opt-turns').checked) url += `&profile:turn_penalty=${TURN_PENALTY}`;
   return url;
 }
 
 // Fetch and parse a route. If our patched profile ever fails where the stock one works,
 // fall back to the stock profile and say so.
-async function brouterRoute(points, profile, signal) {
+async function brouterRoute(points, profile, signal, alt = 0, over = {}) {
   const get = async (url) => {
     const res = await fetch(url, { signal });
     const text = await res.text();
@@ -277,15 +288,15 @@ async function brouterRoute(points, profile, signal) {
     return parseBRouter(JSON.parse(text));
   };
   if (!patchedProfilesBroken) {
-    try { return await get(brouterUrl(points, profile)); } catch (e) {
+    try { return await get(brouterUrl(points, profile, false, alt, over)); } catch (e) {
       if (!e.routing) throw e;
-      const rt = await get(brouterUrl(points, profile, true)); // throws the real routing error if this fails too
+      const rt = await get(brouterUrl(points, profile, true, alt)); // throws the real routing error if this fails too
       patchedProfilesBroken = true;
       console.warn('Patched profile failed, using stock profile:', e.message);
       return rt;
     }
   }
-  return get(brouterUrl(points, profile, true));
+  return get(brouterUrl(points, profile, true, alt));
 }
 
 async function requestRoute(fit) {
@@ -295,7 +306,7 @@ async function requestRoute(fit) {
   routeAbort = new AbortController();
   showMsg('Routing…');
   try {
-    const rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal);
+    const rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal, altIndex);
     if (seq !== routeSeq) return;
     route = rt;
     showMsg(patchedProfilesBroken ? 'Footpath and traffic options are unavailable (profile error), using the standard profile.' : '');
@@ -412,6 +423,13 @@ function renderBreakdown(id, table, cls) {
 }
 
 // ---------- elevation profile ----------
+function gradeColour(g) {
+  if (g >= 9) return '#c92a2a';
+  if (g >= 6) return '#f76707';
+  if (g >= 3) return '#f59f00';
+  if (g <= -3) return '#4dabf7';
+  return '#868e96';
+}
 const elev = $('elev');
 function drawElevation(hoverIdx) {
   const dpr = window.devicePixelRatio || 1;
@@ -449,10 +467,17 @@ function drawElevation(hoverIdx) {
   route.coords.forEach((c, i) => ctx.lineTo(X(route.cum[i]), Y(c[2])));
   ctx.lineTo(X(L), Y(lo));
   ctx.closePath();
-  ctx.fillStyle = 'rgba(214,51,108,.15)'; ctx.fill();
-  ctx.beginPath();
-  route.coords.forEach((c, i) => (i ? ctx.lineTo : ctx.moveTo).call(ctx, X(route.cum[i]), Y(c[2])));
-  ctx.strokeStyle = ROUTE_COLOR; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = 'rgba(134,142,150,.15)'; ctx.fill();
+  // Line coloured by gradient over ~100 m pieces.
+  ctx.lineWidth = 2;
+  for (const p of routePieces(route, 100)) {
+    const len = route.cum[p.i1] - route.cum[p.i0];
+    const g = len ? (100 * ((route.coords[p.i1][2] ?? 0) - (route.coords[p.i0][2] ?? 0))) / len : 0;
+    ctx.strokeStyle = gradeColour(g);
+    ctx.beginPath();
+    for (let i = p.i0; i <= p.i1; i++) (i === p.i0 ? ctx.moveTo : ctx.lineTo).call(ctx, X(route.cum[i]), Y(route.coords[i][2]));
+    ctx.stroke();
+  }
 
   // toilet / water ticks along the bottom
   for (const s of stopsOnRoute) {
@@ -744,44 +769,6 @@ function readHash() {
   const pts = w.split(';').map((s) => s.split(',').map(Number)).filter((a) => a.length === 2 && a.every(Number.isFinite));
   return pts.length ? pts.map(([lng, lat]) => ({ lng, lat })) : null;
 }
-$('share').onclick = async () => {
-  const url = location.href;
-  try { await navigator.clipboard.writeText(url); showMsg('Link copied.'); }
-  catch { showMsg(url); }
-  setTimeout(() => showMsg(''), 4000);
-};
-
-function renderSaved() {
-  const list = store.get('cp.routes', []);
-  const ul = $('saved');
-  ul.innerHTML = '';
-  list.forEach((r, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<span>${escapeHtml(r.name)} <small class="small">${r.km ?? ''} km</small></span><button title="Delete">✕</button>`;
-    li.querySelector('span').onclick = () => {
-      $('profile').value = r.profile === 'fastbike-lowtraffic' ? 'fastbike' : (r.profile || 'fastbike');
-      $('route-name').value = r.name;
-      setWaypoints(r.wp, { fit: true });
-    };
-    li.querySelector('button').onclick = () => {
-      const l = store.get('cp.routes', []); l.splice(i, 1); store.set('cp.routes', l); renderSaved();
-    };
-    ul.appendChild(li);
-  });
-}
-$('save').onclick = () => {
-  if (waypoints.length < 2) { showMsg('Plan a route first.'); return; }
-  const list = store.get('cp.routes', []);
-  const name = routeName();
-  const entry = { name, wp: waypoints, profile: $('profile').value, km: route ? fmtKm(route.length) : null, saved: Date.now() };
-  const i = list.findIndex((r) => r.name === name);
-  if (i >= 0) list[i] = entry; else list.unshift(entry);
-  store.set('cp.routes', list);
-  renderSaved();
-  showMsg(`Saved “${name}” in this browser.`);
-  setTimeout(() => showMsg(''), 3000);
-};
-
 // ---------- controls ----------
 $('undo').onclick = () => { if (undoStack.length) setWaypoints(undoStack.pop(), { record: false }); };
 $('reverse').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints].reverse()); };
@@ -857,6 +844,5 @@ function restoreSettings() {
   const poi = store.get('cp.poi', true);
   $('lyr-poi').checked = poi;
   map.setLayoutProperty('pois', 'visibility', poi ? 'visible' : 'none');
-  renderSaved();
   drawElevation();
 }

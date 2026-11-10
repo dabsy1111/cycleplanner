@@ -36,6 +36,14 @@ The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `c
 
 "Avoid busy roads" sets each profile's own traffic option per request. If a patched profile ever fails to load, the app falls back to the stock one and says so.
 
+Two more switches live in **Route options**: "fewer traffic lights" (each light counts as a 300 m detour, stop/give way 100 m) and "fewer turns" (60 m per turn). Both are extra settings in the patched profiles (`signal_penalty`, `turn_penalty`).
+
+**No-go areas** are BRouter `nogos` circles. "Avoid completely" never enters; "prefer to avoid" uses a weight of 10 (cost per metre ridden inside). They're stored on the server in `data/settings.json`.
+
+## Saved routes and short links
+
+Routes are saved on the server in `data/routes/`, so every device sees the same list. "Copy short link" stores the route and gives a `#r=abc123` link. Routes saved in a browser before this existed are moved to the server the first time that browser opens the app.
+
 ## Changing how it routes
 
 Routing profiles live in `data/profiles/*.brf` inside the stack folder (`/opt/stacks/cycleplanner/data/profiles` on a default Dockge install). Edits are picked up on the next request.

@@ -42,8 +42,15 @@ def api(path):
     token = base64.b64encode(f"API_KEY:{API_KEY}".encode()).decode()
     req.add_header("Authorization", f"Basic {token}")
     req.add_header("Accept", "application/json")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.load(r)
+    # intervals.icu sits behind Cloudflare, which blocks Python's default user agent (error 1010).
+    req.add_header("User-Agent", "cycleplanner-history/1.0 (+https://github.com/dabsy1111/cycleplanner)")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            raise RuntimeError("intervals.icu rejected the API key (401). Check ICU_API_KEY.") from e
+        raise
 
 
 def simplify(points, min_gap=12.0):

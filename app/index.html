@@ -99,8 +99,11 @@
     </details>
 
     <details class="sec" data-key="wind" open>
-      <summary>Wind</summary>
+      <summary>Weather &amp; wind</summary>
       <div class="row small">Leaving <input id="wind-time" type="datetime-local"></div>
+      <div class="wx-wrap"><canvas id="wx"></canvas><div id="wx-tip" hidden></div></div>
+      <div class="small wx-legend"><span style="color:#e03131">— temp, - - feels like</span> <span style="color:#1971c2">— wind</span> <span style="color:#74c0fc">— gusts</span> · shaded: your ride, grey: night</div>
+      <div id="wx-sum" class="small"></div>
       <div id="wind-summary" class="small"></div>
       <div class="row buttons"><button id="wind-reverse" hidden>Ride it the other way</button></div>
     </details>
@@ -159,7 +162,12 @@
     </details>
 
     <details class="sec" data-key="stops">
-      <summary>Toilets &amp; water along the route</summary>
+      <summary>Toilets, water &amp; cafés along the route</summary>
+      <div class="row small">Show
+        <label class="check"><input id="st-toilet" type="checkbox" checked> toilets</label>
+        <label class="check"><input id="st-water" type="checkbox" checked> water</label>
+        <label class="check"><input id="st-cafe" type="checkbox" checked> cafés</label>
+      </div>
       <div class="row small">
         Within <input id="poi-radius" type="number" min="50" max="1000" step="50" value="250"> m of the route,
         warn on gaps over <input id="gap-km" type="number" min="5" max="200" step="5" value="25"> km
@@ -173,7 +181,7 @@
       <div class="row">
         <input id="route-name" type="text" placeholder="Route name">
       </div>
-      <label class="check"><input id="gpx-wpt" type="checkbox"> Put toilets &amp; water in the GPX as waypoints</label>
+      <label class="check"><input id="gpx-wpt" type="checkbox"> Put the stops shown above (toilets, water, cafés) in the GPX as waypoints</label>
       <div class="row buttons">
         <button id="gpx">Download GPX</button>
         <button id="gpx-share" hidden>Share GPX</button>
@@ -191,7 +199,7 @@
       <label class="check"><input id="md-rail" type="checkbox" checked> Train stations</label>
       <label class="check"><input id="md-places" type="checkbox" checked> Shops, cafés &amp; other places</label>
       <label class="check"><input id="md-streets" type="checkbox" checked> Street names</label>
-      <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets &amp; water (zoom in to see)</label>
+      <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets, water &amp; cafés (zoom in to see)</label>
       <div class="row small">
         Colour route by
         <select id="colour-by">

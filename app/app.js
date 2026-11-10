@@ -155,7 +155,7 @@ map.on('load', () => {
   map.addLayer({ id: 'pois', type: 'circle', source: 'pois', minzoom: 11,
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 3.5, 16, 7],
-      'circle-color': ['match', ['get', 'kind'], 'water', '#1c7ed6', '#0b7285'],
+      'circle-color': ['match', ['get', 'kind'], 'water', '#1c7ed6', 'cafe', '#8c5a2b', '#0b7285'],
       'circle-stroke-color': '#fff', 'circle-stroke-width': 1.5,
     } });
 
@@ -481,7 +481,7 @@ function drawElevation(hoverIdx) {
 
   // toilet / water ticks along the bottom
   for (const s of stopsOnRoute) {
-    ctx.fillStyle = s.poi.kind === 'water' ? '#1c7ed6' : '#0b7285';
+    ctx.fillStyle = POI_COLOURS[s.poi.kind];
     ctx.fillRect(X(s.km * 1000) - 1, h - pad.b - 5, 2, 5);
   }
 
@@ -524,6 +524,7 @@ function overpassQuery(s, w, n, e) {
 (
   nwr["amenity"="toilets"](${b});
   nwr["amenity"="drinking_water"](${b});
+  nwr["amenity"="cafe"](${b});
   node["man_made"="water_tap"]["drinking_water"="yes"](${b});
 )->.all;
 (way["shop"="mall"](${b});relation["shop"="mall"](${b}););
@@ -534,6 +535,7 @@ out center tags;`;
 }
 
 function usablePoi(t) {
+  if (t.amenity === 'cafe') return !['private', 'no'].includes(t.access) && t.disused !== 'yes';
   if (['yes', 'room', 'area', 'corridor'].includes(t.indoor)) return false;
   if (['indoor', 'underground'].includes(t.location)) return false;
   if (['private', 'no', 'customers', 'permit'].includes(t.access)) return false;
@@ -570,7 +572,7 @@ function ensurePois(s, w, n, e) {
       const lat = el.lat ?? el.center?.lat, lng = el.lon ?? el.center?.lon;
       if (lat == null || !usablePoi(t)) continue;
       const id = `${el.type}/${el.id}`;
-      const kind = t.amenity === 'toilets' ? 'toilet' : 'water';
+      const kind = t.amenity === 'toilets' ? 'toilet' : t.amenity === 'cafe' ? 'cafe' : 'water';
       pois.set(id, { id, lng, lat, kind, hasWater: kind === 'water' || t.drinking_water === 'yes', tags: t });
     }
     if (map.getSource('pois')) {
@@ -589,7 +591,14 @@ function loadViewportPois() {
   ensurePois(b.getSouth(), b.getWest(), b.getNorth(), b.getEast());
 }
 
+const POI_COLOURS = { water: '#1c7ed6', toilet: '#0b7285', cafe: '#8c5a2b' };
+const POI_KINDS = ['toilet', 'water', 'cafe'];
+function kindShown(kind) { const el = $('st-' + kind); return !el || el.checked; }
+function applyPoiFilter() {
+  if (map.getLayer('pois')) map.setFilter('pois', ['in', ['get', 'kind'], ['literal', POI_KINDS.filter(kindShown)]]);
+}
 function poiTitle(p) {
+  if (p.kind === 'cafe') return p.tags.name ? `Café: ${p.tags.name}` : 'Café';
   const t = p.tags;
   const what = p.kind === 'toilet' ? (p.hasWater ? 'Toilet + water' : 'Toilet') : 'Drinking water';
   return t.name ? `${what}: ${t.name}` : what;
@@ -672,7 +681,7 @@ function renderStops() {
   ul.innerHTML = '';
   gapsEl.innerHTML = '';
   if (!route) return;
-  if (!$('lyr-poi').checked) { gapsEl.innerHTML = '<div class="small">Turn on “Toilets &amp; water” under Map.</div>'; return; }
+  if (!$('lyr-poi').checked) { gapsEl.innerHTML = '<div class="small">Turn on “Toilets, water &amp; cafés” under Map.</div>'; return; }
   const total = route.length / 1000;
   const limit = +$('gap-km').value || 25;
   const water = gapsFor(stopsOnRoute.filter((s) => s.poi.hasWater).map((s) => s.km), total, limit);
@@ -683,6 +692,7 @@ function renderStops() {
     loo.map((g) => `<div class="gap">No toilet ${fmt(g)}</div>`).join('');
   if (!stopsOnRoute.length) { ul.innerHTML = '<li class="small">None found near the route.</li>'; return; }
   for (const s of stopsOnRoute) {
+    if (!kindShown(s.poi.kind)) continue;
     const li = document.createElement('li');
     li.innerHTML = `<span class="km">${s.km.toFixed(1)}</span><i class="dot ${s.poi.kind}"></i>` +
       `<span>${escapeHtml(poiTitle(s.poi))}</span><span class="off">${Math.round(s.off)} m off</span>`;
@@ -728,7 +738,7 @@ function routeName() {
 function buildGpx() {
   const name = escapeHtml(routeName());
   const wpts = $('gpx-wpt').checked
-    ? stopsOnRoute.map((s) => `  <wpt lat="${s.poi.lat.toFixed(6)}" lon="${s.poi.lng.toFixed(6)}"><name>${escapeHtml(poiTitle(s.poi))}</name><sym>${s.poi.kind === 'toilet' ? 'Restroom' : 'Drinking Water'}</sym></wpt>`).join('\n')
+    ? stopsOnRoute.filter((s) => kindShown(s.poi.kind)).map((s) => `  <wpt lat="${s.poi.lat.toFixed(6)}" lon="${s.poi.lng.toFixed(6)}"><name>${escapeHtml(poiTitle(s.poi))}</name><sym>${{ toilet: 'Restroom', cafe: 'Restaurant' }[s.poi.kind] || 'Drinking Water'}</sym></wpt>`).join('\n')
     : '';
   const pts = route.coords.map((c) => `      <trkpt lat="${c[1].toFixed(6)}" lon="${c[0].toFixed(6)}">${c[2] != null ? `<ele>${(+c[2]).toFixed(1)}</ele>` : ''}</trkpt>`).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -820,6 +830,11 @@ function applyMapDetails() {
 for (const k of Object.keys(MAP_DETAILS)) $('md-' + k).addEventListener('change', applyMapDetails);
 
 function restoreSettings() {
+  for (const k of POI_KINDS) {
+    $('st-' + k).checked = store.get('cp.st.' + k, true);
+    $('st-' + k).addEventListener('change', () => { store.set('cp.st.' + k, $('st-' + k).checked); applyPoiFilter(); renderStops(); drawElevation(); });
+  }
+  applyPoiFilter();
   $('gpx-wpt').checked = store.get('cp.gpxwpt', false);
   $('opt-footpaths').checked = store.get('cp.footpaths', true);
   $('opt-traffic').value = store.get('cp.traffic', 'normal');

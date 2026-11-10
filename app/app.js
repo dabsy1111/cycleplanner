@@ -765,7 +765,37 @@ $('poi-radius').onchange = updateStops;
 $('gap-km').onchange = renderStops;
 $('handle').onclick = () => { $('panel').classList.toggle('collapsed'); setTimeout(() => drawElevation(), 250); };
 
+// ---------- base map details (OpenFreeMap "liberty" layer ids) ----------
+const POI_LAYERS = ['poi_r1', 'poi_r7', 'poi_r20', 'poi_transit'];
+const STREET_LAYERS = ['highway-name-path', 'highway-name-minor', 'highway-name-major'];
+const MAP_DETAILS = { bus: false, rail: true, places: true, streets: true };
+const baseFilters = {};
+
+function applyMapDetails() {
+  const d = {};
+  for (const k of Object.keys(MAP_DETAILS)) { d[k] = $('md-' + k).checked; store.set('cp.md.' + k, d[k]); }
+  const hidden = [];
+  if (!d.bus) hidden.push('bus');
+  if (!d.rail) hidden.push('rail', 'railway');
+  for (const id of POI_LAYERS) {
+    if (!map.getLayer(id)) continue;
+    if (!(id in baseFilters)) baseFilters[id] = map.getFilter(id);
+    const parts = [baseFilters[id]].filter(Boolean);
+    if (hidden.length) parts.push(['!', ['match', ['get', 'class'], hidden, true, false]]);
+    // Shops/cafés etc. live in the ranked layers; keep stations there if wanted.
+    if (id !== 'poi_transit' && !d.places) {
+      const keep = [...(d.bus ? ['bus'] : []), ...(d.rail ? ['rail', 'railway'] : [])];
+      parts.push(keep.length ? ['match', ['get', 'class'], keep, true, false] : false);
+    }
+    map.setFilter(id, parts.length > 1 ? ['all', ...parts] : (parts[0] ?? null));
+  }
+  for (const id of STREET_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', d.streets ? 'visible' : 'none');
+}
+for (const k of Object.keys(MAP_DETAILS)) $('md-' + k).addEventListener('change', applyMapDetails);
+
 function restoreSettings() {
+  for (const [k, def] of Object.entries(MAP_DETAILS)) $('md-' + k).checked = store.get('cp.md.' + k, def);
+  applyMapDetails();
   // Collapsible panel sections remember whether they were open.
   document.querySelectorAll('details.sec').forEach((d) => {
     const saved = store.get('cp.sec.' + d.dataset.key, null);

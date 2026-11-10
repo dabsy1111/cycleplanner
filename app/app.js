@@ -787,6 +787,7 @@ $('undo').onclick = () => { if (undoStack.length) setWaypoints(undoStack.pop(), 
 $('reverse').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints].reverse()); };
 $('loop').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints, { ...waypoints[0] }]); };
 $('clear').onclick = () => { if (waypoints.length) setWaypoints([]); };
+$('gpx-wpt').onchange = () => store.set('cp.gpxwpt', $('gpx-wpt').checked);
 $('opt-footpaths').onchange = () => { store.set('cp.footpaths', $('opt-footpaths').checked); requestRoute(false); };
 $('opt-traffic').onchange = () => { store.set('cp.traffic', $('opt-traffic').value); requestRoute(false); };
 $('profile').onchange = () => { store.set('cp.profile', $('profile').value); writeHash(); requestRoute(false); };
@@ -832,6 +833,7 @@ function applyMapDetails() {
 for (const k of Object.keys(MAP_DETAILS)) $('md-' + k).addEventListener('change', applyMapDetails);
 
 function restoreSettings() {
+  $('gpx-wpt').checked = store.get('cp.gpxwpt', false);
   $('opt-footpaths').checked = store.get('cp.footpaths', true);
   $('opt-traffic').value = store.get('cp.traffic', 'normal');
   for (const [k, def] of Object.entries(MAP_DETAILS)) $('md-' + k).checked = store.get('cp.md.' + k, def);

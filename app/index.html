@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cycle Planner</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<aside id="panel" class="collapsed">
+  <button id="handle" aria-label="Expand panel"><span></span></button>
+
+  <div class="row search">
+    <input id="search" type="search" placeholder="Search a place to add it…" autocomplete="off">
+    <ul id="results" hidden></ul>
+  </div>
+
+  <div class="row">
+    <select id="profile" title="Routing profile">
+      <option value="fastbike">Road: fastest</option>
+      <option value="fastbike-lowtraffic">Road: low traffic</option>
+      <option value="safety">Safest (paths first)</option>
+      <option value="trekking">Mixed / touring</option>
+      <option value="gravel">Gravel</option>
+    </select>
+  </div>
+
+  <div class="row buttons">
+    <button id="undo" title="Undo">Undo</button>
+    <button id="reverse" title="Reverse route">Reverse</button>
+    <button id="loop" title="Add the start as the final point">Back to start</button>
+    <button id="clear" title="Clear route">Clear</button>
+  </div>
+
+  <div id="stats" class="row stats">
+    <div><b id="s-dist">–</b><small>km</small></div>
+    <div><b id="s-asc">–</b><small>m up</small></div>
+    <div><b id="s-time">–</b><small>at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</small></div>
+  </div>
+  <div id="msg" class="row msg" hidden></div>
+
+  <div class="scroll">
+    <section>
+      <h3>Elevation</h3>
+      <div class="elev-wrap"><canvas id="elev"></canvas><div id="elev-tip" hidden></div></div>
+    </section>
+
+    <section>
+      <h3>Surface</h3>
+      <div id="bd-surface" class="breakdown"></div>
+      <h3>Way type</h3>
+      <div id="bd-way" class="breakdown"></div>
+    </section>
+
+    <section>
+      <h3>Toilets &amp; water along the route</h3>
+      <div class="row small">
+        Within <input id="poi-radius" type="number" min="50" max="1000" step="50" value="250"> m of the route,
+        warn on gaps over <input id="gap-km" type="number" min="5" max="200" step="5" value="25"> km
+      </div>
+      <div id="gaps"></div>
+      <ul id="stops" class="stops"></ul>
+    </section>
+
+    <section>
+      <h3>Export &amp; save</h3>
+      <div class="row">
+        <input id="route-name" type="text" placeholder="Route name">
+      </div>
+      <label class="check"><input id="gpx-wpt" type="checkbox" checked> Put toilets &amp; water in the GPX as waypoints</label>
+      <div class="row buttons">
+        <button id="gpx">Download GPX</button>
+        <button id="save">Save</button>
+        <button id="share">Copy link</button>
+      </div>
+      <ul id="saved" class="saved"></ul>
+    </section>
+
+    <section>
+      <h3>Map</h3>
+      <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
+      <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets &amp; water (zoom in to see)</label>
+      <div class="row small">
+        Colour route by
+        <select id="colour-by">
+          <option value="none">nothing</option>
+          <option value="surface">surface</option>
+          <option value="way">way type</option>
+        </select>
+      </div>
+      <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. Tap a point to remove it.</p>
+    </section>
+  </div>
+</aside>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+services:
+  brouter:
+    image: ghcr.io/dabsy1111/cycleplanner-brouter:latest
+    restart: unless-stopped
+    environment:
+      TILES: E115_S35        # add E115_S40 for Albany / south coast
+      REFRESH_DAYS: 7        # re-download OpenStreetMap routing data weekly
+      JAVA_MAX_HEAP: 1g
+    volumes:
+      - ./data:/data
+
+  web:
+    image: ghcr.io/dabsy1111/cycleplanner-web:latest
+    restart: unless-stopped
+    depends_on:
+      - brouter
+    ports:
+      - "8090:80"

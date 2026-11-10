@@ -1,0 +1,67 @@
+#!/bin/sh
+# Downloads BRouter routing data on first start, keeps it fresh, and runs the BRouter server.
+#   TILES          space-separated 5x5 degree tiles, e.g. "E115_S35 E115_S40"
+#   REFRESH_DAYS   re-download data older than this many days (0 = never)
+set -e
+
+TILES="${TILES:-E115_S35}"
+REFRESH_DAYS="${REFRESH_DAYS:-7}"
+DATA_DIR="${DATA_DIR:-/data}"
+BROUTER_HOME="${BROUTER_HOME:-/opt/brouter}"
+SEGMENTS_URL="${SEGMENTS_URL:-https://brouter.de/brouter/segments4}"
+
+SEG="$DATA_DIR/segments"
+PROF="$DATA_DIR/profiles"
+CUST="$DATA_DIR/customprofiles"
+mkdir -p "$SEG" "$PROF" "$CUST"
+
+# Stock profiles go in without overwriting any you've edited.
+for f in "$BROUTER_HOME"/profiles-default/*; do
+  [ -e "$PROF/$(basename "$f")" ] || cp "$f" "$PROF/"
+done
+# lookups.dat has to match the BRouter version, so always refresh it.
+cp "$BROUTER_HOME/profiles-default/lookups.dat" "$PROF/lookups.dat"
+
+download() {
+  echo "Downloading $1.rd5 ..."
+  curl -fsSL --retry 3 -o "$SEG/$1.rd5.part" "$SEGMENTS_URL/$1.rd5" && mv "$SEG/$1.rd5.part" "$SEG/$1.rd5"
+}
+
+for t in $TILES; do
+  if [ ! -s "$SEG/$t.rd5" ]; then
+    download "$t" || { echo "Could not download $t.rd5" >&2; exit 1; }
+  fi
+done
+
+stale_tiles() {
+  [ "$REFRESH_DAYS" -gt 0 ] || return 0
+  for t in $TILES; do
+    if [ -n "$(find "$SEG/$t.rd5" -mtime +"$((REFRESH_DAYS - 1))" 2>/dev/null)" ]; then echo "$t"; fi
+  done
+}
+
+PID=""
+start() {
+  echo "Starting BRouter with tiles: $TILES"
+  java -Xmx"${JAVA_MAX_HEAP:-1g}" -cp "$BROUTER_HOME/brouter.jar" \
+    btools.server.RouteServer "$SEG" "$PROF" "$CUST" 17777 "${MAX_THREADS:-4}" 0.0.0.0 &
+  PID=$!
+}
+stop() {
+  if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi
+  PID=""
+}
+trap 'stop; exit 0' TERM INT
+
+start
+while true; do
+  sleep "${CHECK_INTERVAL:-3600}" &
+  wait $! || true
+  if ! kill -0 "$PID" 2>/dev/null; then echo "BRouter stopped unexpectedly" >&2; exit 1; fi
+  STALE="$(stale_tiles)"
+  if [ -n "$STALE" ]; then
+    ok=1
+    for t in $STALE; do download "$t" || ok=0; done
+    if [ "$ok" = 1 ]; then echo "Routing data refreshed, restarting BRouter"; stop; start; fi
+  fi
+done

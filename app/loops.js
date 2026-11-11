@@ -145,9 +145,9 @@ function uturns(rt, minLen = 100) {
 const uturnMetres = (rt) => uturns(rt).reduce((a, u) => a + u.len, 0);
 
 // ... and move the point back to where its spike leaves the through road, then reroute.
-async function trimSpikes(pts, rt, profile) {
+async function trimSpikes(pts, rt, profile, fixed = []) {
   for (let round = 0; round < 2; round++) {
-    const sp = spikes(rt, pts).filter((s) => s.len > 40);
+    const sp = spikes(rt, pts).filter((s) => s.len > 40 && !fixed.includes(s.n));
     if (!sp.length) break;
     pts = pts.slice();
     for (const s of sp) pts[s.n] = pointAt(rt, s.at - s.len);
@@ -161,6 +161,51 @@ async function routeCircle(start, brg, radius, profile) {
   let pts = circlePoints(start, brg, radius);
   if (lp('lp-snap')) pts = [pts[0], ...pts.slice(1, -1).map((p) => snapPoint(p)), pts[pts.length - 1]];
   return trimSpikes(pts, await fetchRoute(pts, profile), profile);
+}
+
+// ---------- loops through a chosen point ----------
+// Start A, turnaround B, and a point out to each side of the line A-B, so you ride out one way
+// and home another. A shape is [f1, f2, s]: how far along A-B each side point sits, and how
+// the width is split between the two sides.
+const THROUGH_SHAPES = [[0.5, 0.5, 0.5], [0.5, 0.5, 0.2], [0.5, 0.5, 0.8], [0.35, 0.65, 0.5],
+  [0.65, 0.35, 0.5], [0.35, 0.35, 0.5], [0.65, 0.65, 0.5], [0.5, 0.5, 0.05]];
+
+function throughPoints(A, B, shape, width) {
+  const brg = bearing(A, B), c = haversine(A, B), [f1, f2, s] = shape;
+  const side = (f, w, dir) => destination(destination(A, brg, c * f), (brg + dir + 360) % 360, w);
+  return [A, side(f1, width * s, 90), B, side(f2, width * (1 - s), -90), A];
+}
+function pathLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += haversine(pts[i - 1], pts[i]); return L; }
+// Width that makes the straight-line shape this long (it only grows with width, so bisect).
+function widthFor(A, B, shape, len) {
+  let lo = 0, hi = len;
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pathLength(throughPoints(A, B, shape, mid)) < len) lo = mid; else hi = mid; }
+  return lo;
+}
+async function routeThrough(A, B, shape, width, profile) {
+  let pts = throughPoints(A, B, shape, width);
+  if (lp('lp-snap')) pts = pts.map((p, i) => (i === 1 || i === 3 ? snapPoint(p) : p));
+  return trimSpikes(pts, await fetchRoute(pts, profile), profile, [2]);
+}
+async function makeThroughLoop(A, B, shape, target, profile) {
+  const c = haversine(A, B);
+  const minWidth = c * 0.3; // narrower than this and out and back share the same roads
+  let len = target / 1.3; // roads are ~30% longer than straight lines
+  let best = null;
+  const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const width = Math.max(minWidth, widthFor(A, B, shape, len));
+    const l = await routeThrough(A, B, shape, width, profile);
+    l.err = Math.abs(l.rt.length - target) / target;
+    l.repeat = repeatShare(l.rt);
+    l.uturn = uturnMetres(l.rt);
+    l.brg = bearing(A, l.pts[1]);
+    l.through = true;
+    if (!best || badness(l) < badness(best)) best = l;
+    if (l.err < 0.07 || (width === minWidth && l.rt.length > target)) break;
+    len *= target / l.rt.length;
+  }
+  return best;
 }
 
 async function makeLoop(start, brg, target, profile) {
@@ -251,7 +296,7 @@ function renderLoops() {
     if (l.interval) bits.push(`${l.interval.mins} min stretch`);
     if (l.liked && l.liked.pct >= 1) bits.push(`${Math.round(l.liked.pct)}% liked roads`);
     li.innerHTML = `<span class="km">${fmtKm(l.rt.length)}</span>` +
-      `<span>${k === 0 ? '<span class="tag">best match</span> ' : ''}Heads ${compass(l.brg)} · ${bits.join(' · ')}</span>` +
+      `<span>${k === 0 ? '<span class="tag">best match</span> ' : ''}${l.through ? `Out via the ${compass(l.brg)} side` : `Heads ${compass(l.brg)}`} · ${bits.join(' · ')}</span>` +
       `<span class="off">${l.wind ? fmtWind(l.wind.second).replace('wind', 'wind home') : ''}</span>`;
     li.onmouseenter = () => showLoopPreview(k);
     li.onmouseleave = () => showLoopPreview(-1);
@@ -262,10 +307,11 @@ function renderLoops() {
       $('loop-status').textContent = 'Tap another loop to swap. Generate again for new ones.';
       if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
       const last = l.pts.length - 1;
-      setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
+      // The point you chose to loop through stays exactly where you put it.
+      setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === 2) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
         targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
-        switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked'].map((id) => [id, lp(id)])),
+        switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through'].map((id) => [id, lp(id)])),
         climbTarget: +$('lp-climb-m').value, intervalMin: +$('lp-interval-min').value, novelty: $('lp-novelty').value,
         stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), uturnM: l.uturn, newPct: l.newPct == null ? null : Math.round(l.newPct) },
         waypoints: l.pts,
@@ -296,7 +342,18 @@ async function generateLoops() {
       try { await loadPathIndex(start, target / (2 * Math.PI)); } catch { pathIndex = { key: '', cells: new Map() }; }
       if (lp('lp-liked')) addLikedToPathIndex();
     }
-    const bearings = lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
+    let note = '';
+    // With a second point and "through my point" on, every loop goes out to that point and back another way.
+    // (Points a generated loop placed don't count, so you can regenerate after picking one.)
+    const own = waypoints.slice(1).find((w) => !w.auto && haversine(start, [w.lng, w.lat]) > 30);
+    const B = lp('lp-through') && own ? [own.lng, own.lat] : null;
+    if (B && haversine(start, B) < 300) { st.textContent = 'Your second point is too close to the start to loop through. Move it, or untick "Loop through my second point".'; return; }
+    if (B && haversine(start, B) * 2 * 1.2 > target) {
+      $('loop-km').value = Math.ceil((haversine(start, B) * 2 * 1.45) / 5000) * 5;
+      note = `Your point is ${fmtKm(haversine(start, B))} km away, so loops through it are about ${$('loop-km').value} km.`;
+    }
+    const tgt = B ? Math.max(target, haversine(start, B) * 2 * 1.45) : target;
+    const bearings = B ? THROUGH_SHAPES : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
     const found = [];
     let done = 0;
     st.textContent = `Working… 0 of ${bearings.length}`;
@@ -305,13 +362,14 @@ async function generateLoops() {
       while (queue.length) {
         const brg = queue.shift();
         try {
-          const l = await makeLoop(start, brg, target, profile);
+          const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
           // Ride it whichever way puts the wind behind you on the way home.
           if (wind) {
             const fwd = windStats(l.rt), rev = windStats(l.rt, true);
             if (rev.second < fwd.second - 1) {
               l.pts = [...l.pts].reverse();
               l.rt = await fetchRoute(l.pts, profile);
+              l.err = Math.abs(l.rt.length - tgt) / tgt;
               l.wind = windStats(l.rt);
             } else l.wind = fwd;
           }
@@ -329,7 +387,6 @@ async function generateLoops() {
       l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
     }
     let list = found;
-    let note = '';
     if (lp('lp-interval') && found.length) {
       st.textContent = 'Checking lights and crossings for interval stretches…';
       const mins = +$('lp-interval-min').value || 8;
@@ -381,7 +438,7 @@ map.on('load', () => {
 });
 
 // Remember the loop switches.
-for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked']) {
+for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through']) {
   $(id).checked = store.get('cp.' + id, $(id).checked);
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).checked));
 }

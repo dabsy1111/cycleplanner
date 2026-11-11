@@ -16,8 +16,10 @@ function safetyStretches(rt) {
     if (!main && !fast) { out.push(null); continue; }
     const kind = `${h.replace('_link', ' link')} road${v ? `, ${v} km/h` : ''}`;
     const prev = out[out.length - 1];
-    if (prev && prev.kind === kind && prev.i1 === s.i0) { prev.i1 = s.i1; prev.fast ||= fast; }
-    else out.push({ i0: s.i0, i1: s.i1, kind, fast });
+    // Highways and freeways (trunk, motorway) or 80 km/h+ get a warning sign on the map.
+    const severe = fast || /^(trunk|motorway)/.test(h);
+    if (prev && prev.kind === kind && prev.i1 === s.i0) { prev.i1 = s.i1; prev.fast ||= fast; prev.severe ||= severe; }
+    else out.push({ i0: s.i0, i1: s.i1, kind, fast, severe });
   }
   return out.filter(Boolean).map((x) => ({ ...x, len: rt.cum[x.i1] - rt.cum[x.i0] })).filter((x) => x.len >= 50);
 }
@@ -27,9 +29,9 @@ function safetyFeatures(list) {
   const feats = [];
   for (const x of list) {
     const line = route.coords.slice(x.i0, x.i1 + 1).map((p) => [p[0], p[1]]);
-    const props = { fast: x.fast ? 1 : 0, label: `${fmtKm(x.len)} km · ${x.kind}`, km: (route.cum[x.i0] / 1000).toFixed(1) };
+    const props = { fast: x.fast || /^(trunk|motorway)/.test(x.kind) ? 1 : 0, label: `${fmtKm(x.len)} km · ${x.kind}`, km: (route.cum[x.i0] / 1000).toFixed(1) };
     feats.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: line } });
-    if (x.len >= 150) {
+    if (x.severe && x.len >= 100) {
       const mid = pointAt(route, (route.cum[x.i0] + route.cum[x.i1]) / 2);
       feats.push({ type: 'Feature', properties: props, geometry: { type: 'Point', coordinates: [mid[0], mid[1]] } });
     }
@@ -61,7 +63,7 @@ map.on('load', () => {
   map.on('click', 'safety-icon', (e) => {
     const p = e.features[0].properties;
     new maplibregl.Popup({ offset: 24 }).setLngLat(e.lngLat)
-      .setHTML(`<b>${p.fast ? 'Fast road' : 'Main road'}</b>from km ${p.km}: ${escapeHtml(p.label)}`).addTo(map);
+      .setHTML(`<b>Highway or fast road</b>from km ${p.km}: ${escapeHtml(p.label)}`).addTo(map);
   });
   map.on('mouseenter', 'safety-icon', () => { map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'safety-icon', () => { map.getCanvas().style.cursor = ''; });

@@ -464,6 +464,106 @@ def overpass_query(q):
     raise RuntimeError(f"Overpass unavailable: {last}")
 
 
+# ---------- bike paths: a local copy for the loop generator ----------
+# One Overpass download of every bike path in the area, refreshed weekly, so the loop
+# generator doesn't wait on Overpass every time it snaps points to paths.
+BIKEPATHS = os.path.join(os.environ.get("DATA_DIR", "/data"), "bikepaths.json")
+BIKEPATH_BBOX = os.environ.get("BIKEPATH_BBOX", "-32.80,115.55,-31.40,116.30")  # south,west,north,east: Mandurah to Two Rocks, coast to the hills
+BIKEPATH_DAYS = float(os.environ.get("BIKEPATH_DAYS", "7"))
+BP_CELL = 0.005  # must match SNAP_CELL in app/loops.js
+bikepaths = {"cells": None, "updated": None, "error": None}
+
+
+def _load_bikepaths():
+    try:
+        with open(BIKEPATHS) as f:
+            d = json.load(f)
+        bikepaths["cells"], bikepaths["updated"] = d["cells"], d["updated"]
+    except (OSError, ValueError, KeyError):
+        pass
+
+
+def _overpass_ways(bbox):
+    q = f"""[out:json][timeout:180];
+(
+  way["highway"="cycleway"]({bbox});
+  way["highway"~"^(path|footway)$"]["bicycle"="designated"]({bbox});
+);
+out skel geom;"""
+    data = urllib.parse.urlencode({"data": q}).encode()
+    last = None
+    for attempt in range(6):
+        for url in OVERPASS_URLS:
+            try:
+                req = urllib.request.Request(url, data=data, headers={
+                    "User-Agent": "cycleplanner/1.0 (+https://github.com/dabsy1111/cycleplanner)",
+                    "Content-Type": "application/x-www-form-urlencoded"})
+                with urllib.request.urlopen(req, timeout=240) as r:
+                    return json.loads(r.read()).get("elements") or []
+            except Exception as e:
+                last = e
+        time.sleep(30 * 2 ** attempt)  # Overpass is busy: back off (30 s up to 16 min)
+    raise RuntimeError(str(last))
+
+
+def refresh_bikepaths():
+    # The whole area in one query is too big for Overpass, so fetch it in ~25 km tiles.
+    s, w, n, e = [float(v) for v in BIKEPATH_BBOX.split(",")]
+    STEP = 0.25
+    cells, ways = {}, 0
+    lat = s
+    try:
+        while lat < n:
+            lng = w
+            while lng < e:
+                tile = f"{lat:.4f},{lng:.4f},{min(n, lat + STEP):.4f},{min(e, lng + STEP):.4f}"
+                for el in _overpass_ways(tile):
+                    ways += 1
+                    for g in el.get("geometry") or []:
+                        k = f"{math.floor(g['lon'] / BP_CELL)}:{math.floor(g['lat'] / BP_CELL)}"
+                        cells.setdefault(k, []).append([round(g["lon"], 5), round(g["lat"], 5)])
+                time.sleep(2)  # be polite to the public server
+                lng += STEP
+            lat += STEP
+    except RuntimeError as err:
+        bikepaths["error"] = f"download failed: {err}"[:200]
+        print(f"bike paths: download failed ({err}), keeping the old copy", flush=True)
+        return
+    if ways < 100:  # a broken answer: keep the copy we have
+        bikepaths["error"] = f"only {ways} paths returned"
+        return
+    updated = time.strftime("%Y-%m-%d %H:%M", time.localtime())
+    _write_json(BIKEPATHS, {"updated": updated, "bbox": BIKEPATH_BBOX, "cells": cells})
+    bikepaths.update(cells=cells, updated=updated, error=None)
+    print(f"bike paths: {ways} ways, {len(cells)} cells", flush=True)
+
+
+def bikepath_scheduler():
+    _load_bikepaths()
+    while True:
+        try:
+            fresh = os.path.exists(BIKEPATHS) and time.time() - os.stat(BIKEPATHS).st_mtime < BIKEPATH_DAYS * 86400
+            if not fresh:
+                refresh_bikepaths()
+        except Exception as e:
+            bikepaths["error"] = str(e)[:200]
+        time.sleep(3600)  # checks hourly; it only downloads once the copy is a week old (or missing)
+
+
+def bikepaths_in(bbox):
+    cells = bikepaths["cells"]
+    if cells is None:
+        return None
+    s, w, n, e = bbox
+    out = {}
+    for cx in range(math.floor(w / BP_CELL), math.floor(e / BP_CELL) + 1):
+        for cy in range(math.floor(s / BP_CELL), math.floor(n / BP_CELL) + 1):
+            pts = cells.get(f"{cx}:{cy}")
+            if pts:
+                out[f"{cx}:{cy}"] = pts
+    return out
+
+
 def scheduler():
     if not API_KEY:
         return
@@ -511,6 +611,21 @@ class Handler(BaseHTTPRequestHandler):
                 status["last_sync"] = load_state().get("last_sync")
             body = {"configured": bool(API_KEY), "rides": ride_count(), **status}
             self.send(200, json.dumps(body).encode())
+        elif path == "/api/bikepaths":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            try:
+                bbox = [float(v) for v in (qs.get("bbox") or [""])[0].split(",")]
+                assert len(bbox) == 4 and (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) < 4
+            except (ValueError, AssertionError):
+                self.send(400, b'{"error":"bbox=s,w,n,e"}')
+                return
+            cells = bikepaths_in(bbox)
+            if cells is None:
+                self.send(503, json.dumps({"error": bikepaths["error"] or "still downloading"}).encode())
+                return
+            s, w, n, e = [float(v) for v in BIKEPATH_BBOX.split(",")]
+            covered = bbox[0] >= s and bbox[1] >= w and bbox[2] <= n and bbox[3] <= e
+            self.send(200, json.dumps({"updated": bikepaths["updated"], "covered": covered, "cells": cells}, separators=(",", ":")).encode())
         elif path == "/api/history/tracks":
             self.send(200, tracks_body())
         else:
@@ -581,5 +696,6 @@ if __name__ == "__main__":
     os.makedirs(TRACKS, exist_ok=True)
     threading.Thread(target=update_network, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
+    threading.Thread(target=bikepath_scheduler, daemon=True).start()
     print(f"History service on :8000 ({'connected to intervals.icu' if API_KEY else 'no ICU_API_KEY set'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()

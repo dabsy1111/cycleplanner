@@ -48,6 +48,7 @@
   <div class="row buttons">
     <button id="undo" title="Undo">Undo</button>
     <button id="reverse" title="Reverse route">Reverse</button>
+    <button id="home" title="Start from home. With no home saved yet, saves your current start point as home.">Home</button>
     <button id="loop" title="Add the start as the final point">Back to start</button>
     <button id="clear" title="Clear route">Clear</button>
   </div>
@@ -224,7 +225,7 @@
       <details class="sec" data-key="safety">
         <summary>Road safety</summary>
         <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it.</p>
-        <label class="check"><input id="safety-marks" type="checkbox" checked> Warning signs on the map <small>(yellow: main road, red: 80 km/h or more)</small></label>
+        <label class="check"><input id="safety-marks" type="checkbox" checked> Mark it on the map <small>(yellow band: main road; red band and ⚠ sign: highway, freeway or 80 km/h+)</small></label>
       <div id="safety-sum" class="small"></div>
         <ul id="safety" class="stops"></ul>
       </details>

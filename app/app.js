@@ -313,8 +313,11 @@ function renderMarkers() {
       ev.stopPropagation();
       const popup = new maplibregl.Popup({ offset: 14 })
         .setLngLat(w)
-        .setHTML(`<b>${i === 0 ? 'Start' : last ? 'Finish' : 'Via point'}</b><button>Remove point</button>`)
+        .setHTML(`<b>${i === 0 ? 'Start' : last ? 'Finish' : 'Via point'}</b><button>Remove point</button>` +
+          (i === 0 ? ' <button class="set-home">Set as home</button>' : ''))
         .addTo(map);
+      const sh = popup.getElement().querySelector('.set-home');
+      if (sh) sh.onclick = async () => { popup.remove(); await saveHome(w); showMsg('Home saved.'); };
       popup.getElement().querySelector('button').onclick = () => {
         popup.remove();
         setWaypoints(waypoints.filter((_, j) => j !== i));
@@ -897,6 +900,25 @@ function readHash() {
 // ---------- controls ----------
 $('undo').onclick = () => { if (undoStack.length) setWaypoints(undoStack.pop(), { record: false }); };
 $('reverse').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints].reverse()); };
+// Home: a saved start point, kept on the server so every device has it.
+let home = null;
+(async () => { try { const r = await fetch('/api/settings/home'); if (r.ok) home = await r.json(); } catch { /* offline */ } })();
+async function saveHome(p) {
+  home = p ? { lng: +p.lng, lat: +p.lat } : null;
+  try { await fetch('/api/settings/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(home) }); }
+  catch { showMsg('Could not save home: the server did not answer.'); }
+}
+$('home').onclick = async () => {
+  if (!home) {
+    if (!waypoints.length) { showMsg('Put a point on your house, then press Home to save it.'); return; }
+    await saveHome(waypoints[0]);
+    showMsg('Saved your start point as home. Press Home any time to start from there (tap the S marker to change it).');
+    return;
+  }
+  showMsg('');
+  if (!waypoints.length) { setWaypoints([home]); map.easeTo({ center: [home.lng, home.lat], zoom: Math.max(map.getZoom(), 13) }); }
+  else setWaypoints([home, ...waypoints.slice(1)]); // swap the start for home, keep the rest
+};
 $('loop').onclick = () => { if (waypoints.length > 1) setWaypoints([...waypoints, { ...waypoints[0] }]); };
 $('clear').onclick = () => { if (waypoints.length) setWaypoints([]); };
 $('gpx-wpt').onchange = () => store.set('cp.gpxwpt', $('gpx-wpt').checked);

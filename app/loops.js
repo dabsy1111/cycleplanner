@@ -223,7 +223,8 @@ function renderLoops() {
       ul.innerHTML = '';
       $('loop-status').textContent = '';
       if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
-      setWaypoints(l.pts.map(([lng, lat]) => ({ lng, lat })), { fit: true });
+      const last = l.pts.length - 1;
+      setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
         targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
         switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked'].map((id) => [id, lp(id)])),

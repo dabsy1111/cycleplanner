@@ -263,7 +263,8 @@ function nearestIndex(coords, pt, from) {
 function setWaypoints(next, { fit = false, record = true } = {}) {
   if (record) undoStack.push(waypoints.map((w) => ({ ...w })));
   if (undoStack.length > 100) undoStack.shift();
-  waypoints = next.map((w) => ({ lng: +w.lng, lat: +w.lat }));
+  // `auto` marks points the loop generator placed: the router may move them to trim dead-end spikes.
+  waypoints = next.map((w) => (w.auto ? { lng: +w.lng, lat: +w.lat, auto: true } : { lng: +w.lng, lat: +w.lat }));
   altIndex = 0;
   renderMarkers();
   writeHash();
@@ -356,8 +357,20 @@ async function requestRoute(fit) {
   routeAbort = new AbortController();
   showMsg('Routing…');
   try {
-    const rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal, altIndex);
+    let rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal, altIndex);
     if (seq !== routeSeq) return;
+    // Loop points can end up down a dead end when options change (e.g. traffic setting):
+    // pull them back to where the spike leaves the through road and reroute.
+    for (let round = 0; round < 2 && typeof spikes === 'function' && waypoints.some((w) => w.auto); round++) {
+      const pts = waypoints.map((w) => [w.lng, w.lat]);
+      const bad = spikes(rt, pts).filter((s) => waypoints[s.n].auto && s.len > 40);
+      if (!bad.length) break;
+      for (const s of bad) { const p = pointAt(rt, s.at - s.len); waypoints[s.n] = { lng: p[0], lat: p[1], auto: true }; }
+      rt = await brouterRoute(waypoints.map((w) => [w.lng, w.lat]), $('profile').value, routeAbort.signal, altIndex);
+      if (seq !== routeSeq) return;
+      renderMarkers();
+      writeHash();
+    }
     route = rt;
     showMsg(patchedProfilesBroken ? 'Footpath and traffic options are unavailable (profile error), using the standard profile.' : '');
     renderRoute();

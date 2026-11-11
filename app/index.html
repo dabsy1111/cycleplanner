@@ -143,7 +143,7 @@
       <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, footpath, traffic and route options above, and is ridden whichever way gives a tailwind home.</p>
       <div class="loopopts">
         <label class="opt"><input id="lp-noback" type="checkbox" checked>
-          <span><b>Don't double back</b><small>Rejects loops that ride the same road twice (out-and-back spurs) and tries again with shifted waypoints. Each loop shows how much of it repeats.</small></span></label>
+          <span><b>Don't double back</b><small>Rejects loops that ride the same road twice and tries again with shifted waypoints. Each loop shows how much of it repeats. (Dead-end spikes, where a loop point lands in a side street, are always trimmed off.)</small></span></label>
         <label class="opt"><input id="lp-quiet" type="checkbox" checked>
           <span><b>Quieter roads</b><small>Routes the loops with "avoid busy roads" on, whatever the setting above, and ranks loops with less main road first.</small></span></label>
         <label class="opt"><input id="lp-snap" type="checkbox">

@@ -95,11 +95,45 @@ function repeatShare(rt) {
   return total ? (100 * rep) / total : 0;
 }
 
+// ---------- dead-end spikes ----------
+// A loop point that lands in a side street makes the route ride in to touch it and straight back out.
+// Measure that spike at each point (how far the way in and the way out run together) ...
+function pointAt(rt, m) {
+  m = Math.max(0, Math.min(rt.cum[rt.cum.length - 1], m));
+  let i = 0;
+  while (i < rt.cum.length - 2 && rt.cum[i + 1] < m) i++;
+  const span = rt.cum[i + 1] - rt.cum[i] || 1, t = (m - rt.cum[i]) / span;
+  return [rt.coords[i][0] + t * (rt.coords[i + 1][0] - rt.coords[i][0]), rt.coords[i][1] + t * (rt.coords[i + 1][1] - rt.coords[i][1])];
+}
+function spikes(rt, pts) {
+  const out = [];
+  let from = 0;
+  for (let n = 1; n < pts.length - 1; n++) {
+    const iw = nearestIndex(rt.coords, pts[n], from);
+    from = iw;
+    let d = 0;
+    while (d < 5000 && haversine(pointAt(rt, rt.cum[iw] - d - 10), pointAt(rt, rt.cum[iw] + d + 10)) < 25) d += 10;
+    out.push({ n, at: rt.cum[iw], len: d });
+  }
+  return out;
+}
+// ... and move the point back to where its spike leaves the through road, then reroute.
+async function trimSpikes(pts, rt, profile) {
+  for (let round = 0; round < 2; round++) {
+    const sp = spikes(rt, pts).filter((s) => s.len > 40);
+    if (!sp.length) break;
+    pts = pts.slice();
+    for (const s of sp) pts[s.n] = pointAt(rt, s.at - s.len);
+    rt = await fetchRoute(pts, profile);
+  }
+  return { pts, rt };
+}
+
 // ---------- building one loop ----------
 async function routeCircle(start, brg, radius, profile) {
   let pts = circlePoints(start, brg, radius);
   if (lp('lp-snap')) pts = [pts[0], ...pts.slice(1, -1).map((p) => snapPoint(p)), pts[pts.length - 1]];
-  return { pts, rt: await fetchRoute(pts, profile) };
+  return trimSpikes(pts, await fetchRoute(pts, profile), profile);
 }
 
 async function makeLoop(start, brg, target, profile) {

@@ -35,6 +35,8 @@ jobs:
           file: ${{ matrix.file }}
           push: true
           platforms: linux/amd64
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/cycleplanner-${{ matrix.name }}:latest
             ghcr.io/${{ github.repository_owner }}/cycleplanner-${{ matrix.name }}:${{ github.sha }}

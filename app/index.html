@@ -207,6 +207,16 @@
       <div id="import-status" class="small"></div>
     </details>
 
+    <details class="sec" data-key="report">
+      <summary>Report a problem</summary>
+      <p class="hint">Builds a file with everything needed to reproduce this route exactly: points, profile, every option, no-go areas, disliked roads, how a loop was generated, and the route with its road tags. Say what's wrong, mark the spots on the map, then download it and send it to Claude.</p>
+      <textarea id="rep-notes" rows="3" placeholder="What don't you like? e.g. “goes down Canning Hwy around km 12, I'd rather take the river path”"></textarea>
+      <div class="row buttons"><button id="rep-spot">Mark a problem spot</button></div>
+      <ul id="rep-spots" class="stops"></ul>
+      <div class="row buttons"><button id="rep-download">Download report</button><button id="rep-copy">Copy report</button></div>
+      <div id="rep-status" class="small"></div>
+    </details>
+
     <details class="sec" data-key="map" open>
       <summary>Map</summary>
       <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
@@ -244,5 +254,6 @@
 <script src="pace.js"></script>
 <script src="roads.js"></script>
 <script src="gpximport.js"></script>
+<script src="report.js"></script>
 </body>
 </html>

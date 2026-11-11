@@ -3,6 +3,7 @@
    then filtered and ranked by the switches in the Loop generator section. */
 
 let loopResults = [];
+let lastLoop = null; // how the current route was generated, for problem reports
 let loopBusy = false;
 
 const lp = (id) => $(id).checked;
@@ -189,6 +190,13 @@ function renderLoops() {
       $('loop-status').textContent = '';
       if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
       setWaypoints(l.pts.map(([lng, lat]) => ({ lng, lat })), { fit: true });
+      lastLoop = {
+        targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
+        switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked'].map((id) => [id, lp(id)])),
+        climbTarget: +$('lp-climb-m').value, intervalMin: +$('lp-interval-min').value, novelty: $('lp-novelty').value,
+        stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), newPct: l.newPct == null ? null : Math.round(l.newPct) },
+        waypoints: l.pts,
+      };
     };
     ul.appendChild(li);
   });

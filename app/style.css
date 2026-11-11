@@ -166,3 +166,7 @@ body.placing #map canvas { cursor: crosshair !important; }
 .filebtn { flex: 1; padding: 7px 6px; border: 1px solid var(--line); background: #f8f9fa; border-radius: 7px; cursor: pointer; text-align: center; }
 .badge.like { background: #d3f9d8; color: #2b8a3e; }
 .badge.dislike { background: #ffe3e3; color: #c92a2a; }
+
+textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; font: inherit; resize: vertical; }
+.spot { width: 22px; height: 22px; border-radius: 50%; background: #f76707; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.stops li input.spot-note { flex: 1; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-size: 13px; }

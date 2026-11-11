@@ -3,6 +3,7 @@
    then filtered and ranked by the switches in the Loop generator section. */
 
 let loopResults = [];
+let loopPicked = -1; // index of the loop on the map; the list stays so you can swap
 let lastLoop = null; // how the current route was generated, for problem reports
 let loopBusy = false;
 
@@ -211,10 +212,11 @@ function showLoopPreview(highlight = -1) {
   if (!src) return;
   src.setData({
     type: 'FeatureCollection',
+    // Once one is picked, only show another when you hover it.
     features: loopResults.map((l, k) => ({
       type: 'Feature', properties: { hl: k === highlight ? 1 : 0 },
       geometry: { type: 'LineString', coordinates: l.rt.coords.map((c) => [c[0], c[1]]) },
-    })),
+    })).filter((f, k) => loopPicked < 0 || (k === highlight && k !== loopPicked)),
   });
   const iv = map.getSource('loop-interval');
   if (iv) {
@@ -230,6 +232,7 @@ function renderLoops() {
   ul.innerHTML = '';
   loopResults.forEach((l, k) => {
     const li = document.createElement('li');
+    if (k === loopPicked) li.classList.add('picked');
     const bits = [`${Math.round(l.rt.ascend)} m up`, `${Math.round(l.mainPct)}% main road`];
     if (l.repeat >= 3) bits.push(`${Math.round(l.repeat)}% repeated`);
     if (l.uturn) bits.push(`<span class="badge warn">${l.uturn} m of U-turns</span>`);
@@ -242,10 +245,10 @@ function renderLoops() {
     li.onmouseenter = () => showLoopPreview(k);
     li.onmouseleave = () => showLoopPreview(-1);
     li.onclick = () => {
-      loopResults = [];
+      loopPicked = k;
+      renderLoops();
       showLoopPreview();
-      ul.innerHTML = '';
-      $('loop-status').textContent = '';
+      $('loop-status').textContent = 'Tap another loop to swap. Generate again for new ones.';
       if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
       const last = l.pts.length - 1;
       setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
@@ -272,6 +275,7 @@ async function generateLoops() {
   const st = $('loop-status');
   $('loop-go').disabled = true;
   loopResults = [];
+  loopPicked = -1;
   renderLoops();
   showLoopPreview();
   try {

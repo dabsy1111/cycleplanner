@@ -45,7 +45,7 @@
 
   <div id="stats" class="row stats">
     <div><b id="s-dist">–</b><small>km</small></div>
-    <div><b id="s-asc">–</b><small>m up</small></div>
+    <div><b id="s-asc">–</b><small>m up<span id="s-steep" title="Steepest 200 m of the route"></span></small></div>
     <div><b id="s-time">–</b><small>
       <span id="pace-flat">at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</span>
       <span id="pace-power" hidden>at <input id="pace-pct" type="number" min="30" max="120" step="5" value="65">% FTP</span>
@@ -61,7 +61,7 @@
       <label class="opt"><input id="opt-turns" type="checkbox">
         <span><b>Fewer turns</b><small>Adds a cost to every turn, so the route sticks to fewer, longer roads instead of zigzagging through side streets. Easier to follow without looking at the screen.</small></span></label>
       <label class="opt"><input id="opt-alts" type="checkbox">
-        <span><b>Show alternatives</b><small>For A-to-B routes, asks the router for up to three other ways and draws them in grey. Tap one in the list to ride it instead.</small></span></label>
+        <span><b>Show alternatives</b><small>Routes the same points a few different ways (fastest, safest, touring) and keeps up to three that are really different from yours: each is labelled with what it wins on, shortest, least climbing or quietest. Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
       <ul id="alts" class="stops"></ul>
     </details>
 

@@ -61,6 +61,17 @@ function findClimbs(rt) {
   return climbs;
 }
 
+// Share of a climb that's on roads from your ride history (history.js).
+function climbRidden(rt, c) {
+  if (typeof isRidden !== 'function' || !ridden || !ridden.size) return null;
+  let n = 0, hit = 0;
+  for (let d = rt.cum[c.i0]; d <= rt.cum[c.i1]; d += 25) {
+    const p = pointAt(rt, d); n++;
+    if (isRidden(p[0], p[1])) hit++;
+  }
+  return n ? hit / n >= 0.7 : null;
+}
+
 function renderClimbs() {
   const ul = $('climbs');
   ul.innerHTML = '';
@@ -69,10 +80,12 @@ function renderClimbs() {
   if (!route) return;
   if (!climbList.length) { ul.innerHTML = '<li class="small">No climbs on this route.</li>'; return; }
   climbList.forEach((c) => {
+    c.ridden = climbRidden(route, c);
+    const tag = c.ridden == null ? '' : c.ridden ? ' <span class="tag grey">ridden before</span>' : ' <span class="tag">new</span>';
     const li = document.createElement('li');
     li.innerHTML = `<span class="km">${(route.cum[c.i0] / 1000).toFixed(1)}</span>` +
       `<i class="dot" style="background:${gradeColour(c.avg)}"></i>` +
-      `<span>${fmtKm(c.len)} km at ${c.avg.toFixed(1)}% (max ${c.max.toFixed(0)}%)</span><span class="off">+${Math.round(c.gain)} m</span>`;
+      `<span>${fmtKm(c.len)} km at ${c.avg.toFixed(1)}% (max ${c.max.toFixed(0)}%)${tag}</span><span class="off">+${Math.round(c.gain)} m</span>`;
     li.onclick = () => {
       const coords = route.coords.slice(c.i0, c.i1 + 1).map((p) => [p[0], p[1]]);
       if (map.getSource('climb-hl')) map.getSource('climb-hl').setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } });

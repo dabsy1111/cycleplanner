@@ -69,6 +69,7 @@ async function loadTracks() {
   ridden = buildIndex(fc);
   if (map.getSource('history')) map.getSource('history').setData(fc);
   renderNewShare();
+  if (typeof renderClimbs === 'function') renderClimbs();
   if ($('colour-by').value === 'new') refreshRouteColours();
 }
 

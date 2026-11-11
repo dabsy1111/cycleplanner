@@ -466,10 +466,27 @@ function fitRoute() {
 let modelAvgKmh = null; // average speed from the power model (pace.js), when it's in use
 function speedKmh() { return modelAvgKmh || Math.max(5, +$('speed').value || 27); }
 
+// Steepest stretch of a fixed length. Grades between single points are mostly elevation noise.
+function steepest(rt, win = 200) {
+  let best = { pct: 0, at: 0 };
+  if (!rt || rt.coords.length < 2 || rt.coords[0].length < 3) return best;
+  let j = 0;
+  for (let i = 0; i < rt.coords.length; i++) {
+    while (j < rt.coords.length - 1 && rt.cum[j] - rt.cum[i] < win) j++;
+    if (rt.cum[j] - rt.cum[i] < win) break;
+    const pct = (100 * (rt.coords[j][2] - rt.coords[i][2])) / (rt.cum[j] - rt.cum[i]);
+    if (pct > best.pct) best = { pct, at: rt.cum[i] };
+  }
+  return best;
+}
+
 function renderStats() {
-  if (!route) { $('s-dist').textContent = '–'; $('s-asc').textContent = '–'; $('s-time').textContent = '–'; return; }
+  if (!route) { $('s-dist').textContent = '–'; $('s-asc').textContent = '–'; $('s-time').textContent = '–'; $('s-steep').textContent = ''; return; }
   $('s-dist').textContent = fmtKm(route.length);
   $('s-asc').textContent = Math.round(route.ascend);
+  const st = steepest(route);
+  $('s-steep').textContent = st.pct >= 1 ? ` · max ${st.pct.toFixed(st.pct < 10 ? 1 : 0)}%` : '';
+  $('s-steep').title = st.pct >= 1 ? `Steepest 200 m: ${st.pct.toFixed(1)}% starting at km ${(st.at / 1000).toFixed(1)}` : '';
   const model = typeof modelRide === 'function' ? modelRide(route) : null;
   modelAvgKmh = model ? model.avgKmh : null;
   $('s-time').textContent = fmtDuration(model ? model.hours : route.length / 1000 / speedKmh());

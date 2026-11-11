@@ -132,6 +132,8 @@ input[type=datetime-local] { padding: 3px 5px; border: 1px solid var(--line); bo
 }
 #wind-arrow { display: inline-block; font-weight: 700; color: #1c7ed6; }
 .stops li .tag { font-size: 11px; padding: 0 5px; border-radius: 4px; background: #e7f5ff; color: #1864ab; margin-left: 4px; }
+.stops li .tag.grey { background: #f1f3f5; color: #495057; }
+.stops li .tag.win { background: #ebfbee; color: #2b8a3e; }
 .stops li.active { background: #fff9db; }
 #loops li.picked { background: #ebfbee; box-shadow: inset 3px 0 0 #2f9e44; }
 #loops li.picked .km::after { content: " ✓"; color: #2f9e44; }

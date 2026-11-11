@@ -69,7 +69,8 @@ function buildReport() {
       stretches: routeStretches(route),
       roadSafety: (opt('safetyStretches(route)', []) || []).map((x) => ({ fromKm: +(route.cum[x.i0] / 1000).toFixed(2), km: +(x.len / 1000).toFixed(2), kind: x.kind })),
       uturns: typeof uturns === 'function' ? uturns(route).map((u) => ({ atKm: +(u.at / 1000).toFixed(2), lengthM: u.len })) : null,
-      climbs: (opt('climbList', []) || []).map((c) => ({ fromKm: +(route.cum[c.i0] / 1000).toFixed(2), km: +(c.len / 1000).toFixed(2), avgPct: +c.avg.toFixed(1), maxPct: +c.max.toFixed(1), gainM: Math.round(c.gain) })),
+      steepest200: (() => { const s = steepest(route); return { pct: +s.pct.toFixed(1), atKm: +(s.at / 1000).toFixed(2) }; })(),
+      climbs: (opt('climbList', []) || []).map((c) => ({ fromKm: +(route.cum[c.i0] / 1000).toFixed(2), km: +(c.len / 1000).toFixed(2), avgPct: +c.avg.toFixed(1), maxPct: +c.max.toFixed(1), gainM: Math.round(c.gain), riddenBefore: c.ridden ?? null })),
       geometry: geom.map(([lng, lat]) => [r5(lng), r5(lat)]),
     };
   }

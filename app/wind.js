@@ -124,10 +124,22 @@ function renderWind() {
   el.innerHTML = html;
 }
 
+// The badge on the map opens the weather window.
+function setWxOpen(open) {
+  $('wx-float').hidden = !open || $('wind-badge').hidden;
+  $('wind-badge').classList.toggle('open', !$('wx-float').hidden);
+  store.set('cp.wxopen', open);
+  if (!$('wx-float').hidden) drawWeather();
+}
+$('wind-badge').onclick = () => setWxOpen($('wx-float').hidden);
+$('wx-close').onclick = () => setWxOpen(false);
+
 function updateWindBadge(w, dep) {
   const b = $('wind-badge');
-  if (!w) { b.hidden = true; return; }
+  if (!w) { b.hidden = true; $('wx-float').hidden = true; return; }
+  const wasHidden = b.hidden;
   b.hidden = false;
+  if (wasHidden && store.get('cp.wxopen', false)) setWxOpen(true);
   $('wind-arrow').style.transform = `rotate(${(w.dir + 180) % 360}deg)`;
   $('wind-text').textContent = `${compass(w.dir)} ${w.speed.toFixed(0)} km/h · ${new Date(dep).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
 }
@@ -249,7 +261,6 @@ wx.addEventListener('touchstart', (e) => drawWeather(e.touches[0].clientX - wx.g
 wx.addEventListener('touchmove', (e) => drawWeather(e.touches[0].clientX - wx.getBoundingClientRect().left), { passive: true });
 wx.addEventListener('touchend', () => { $('wx-tip').hidden = true; drawWeather(); });
 window.addEventListener('resize', debounce(() => drawWeather(), 200));
-$('wind-time').closest('details').addEventListener('toggle', () => drawWeather());
 
 async function refreshWind() {
   const c = route ? route.coords[Math.floor(route.coords.length / 2)] : [map.getCenter().lng, map.getCenter().lat];

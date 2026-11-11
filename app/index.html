@@ -9,7 +9,16 @@
 </head>
 <body>
 <div id="map"></div>
-<div id="wind-badge" hidden><span id="wind-arrow">↑</span> <span id="wind-text"></span></div>
+<button id="wind-badge" type="button" hidden title="Weather and wind for your ride"><span id="wind-arrow">↑</span> <span id="wind-text"></span> <span id="wind-caret">▾</span></button>
+<div id="wx-float" hidden>
+  <div class="wx-head"><b>Weather &amp; wind</b><button id="wx-close" class="linkbtn" title="Hide">✕</button></div>
+      <div class="row small">Leaving <input id="wind-time" type="datetime-local"></div>
+      <div class="wx-wrap"><canvas id="wx"></canvas><div id="wx-tip" hidden></div></div>
+      <div class="small wx-legend"><span style="color:#e03131">— temp, - - feels like</span> <span style="color:#1971c2">— wind</span> <span style="color:#74c0fc">— gusts</span> · shaded: your ride, grey: night</div>
+      <div id="wx-sum" class="small"></div>
+      <div id="wind-summary" class="small"></div>
+      <div class="row buttons"><button id="wind-reverse" hidden>Ride it the other way</button></div>
+    </div>
 
 <aside id="panel" class="collapsed">
   <button id="handle" aria-label="Expand panel"><span></span></button>
@@ -65,24 +74,7 @@
       <ul id="alts" class="stops"></ul>
     </details>
 
-    <details class="sec" data-key="nogo">
-      <summary>No-go areas</summary>
-      <p class="hint">Circles the router stays out of, like a nasty intersection or a road you hate. "Avoid completely" never enters; "prefer to avoid" goes around unless the detour is more than about ten times the distance inside the circle. Saved on the server, so they apply on every device.</p>
-      <div class="row small">
-        Size <select id="nogo-radius" class="inline"><option value="60">small (60 m)</option><option value="150" selected>medium (150 m)</option><option value="400">large (400 m)</option></select>
-        <select id="nogo-mode" class="inline"><option value="hard">avoid completely</option><option value="soft">prefer to avoid</option></select>
-      </div>
-      <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
-      <ul id="nogos" class="stops"></ul>
-    </details>
 
-    <details class="sec" data-key="roads">
-      <summary>Roads I like &amp; dislike</summary>
-      <p class="hint">Tap a button, then tap a road on the map. It marks that road up to about 2 km either way. Disliked roads are avoided unless the way around is much longer (a 200 m detour round Roe Street: avoided; a 7 km detour round the Narrows: still used). Liked roads can't pull the router onto them, but the loop generator favours them and snaps loop points onto them, and you'll see how much of each route uses them.</p>
-      <div class="row buttons"><button id="road-like">Mark a road I like</button><button id="road-dislike">Mark a road I dislike</button></div>
-      <div id="road-sum" class="small"></div>
-      <ul id="roads" class="stops"></ul>
-    </details>
 
     <details class="sec" data-key="elev" open>
       <summary>Elevation</summary>
@@ -95,44 +87,9 @@
       <ul id="climbs" class="stops"></ul>
     </details>
 
-    <details class="sec" data-key="surface" open>
-      <summary>Surface</summary>
-      <div id="bd-surface" class="breakdown"></div>
-      <h3>Way type</h3>
-      <div id="bd-way" class="breakdown"></div>
-    </details>
 
-    <details class="sec" data-key="safety">
-      <summary>Road safety</summary>
-      <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it.</p>
-      <div id="safety-sum" class="small"></div>
-      <ul id="safety" class="stops"></ul>
-    </details>
 
-    <details class="sec" data-key="wind" open>
-      <summary>Weather &amp; wind</summary>
-      <div class="row small">Leaving <input id="wind-time" type="datetime-local"></div>
-      <div class="wx-wrap"><canvas id="wx"></canvas><div id="wx-tip" hidden></div></div>
-      <div class="small wx-legend"><span style="color:#e03131">— temp, - - feels like</span> <span style="color:#1971c2">— wind</span> <span style="color:#74c0fc">— gusts</span> · shaded: your ride, grey: night</div>
-      <div id="wx-sum" class="small"></div>
-      <div id="wind-summary" class="small"></div>
-      <div class="row buttons"><button id="wind-reverse" hidden>Ride it the other way</button></div>
-    </details>
 
-    <details class="sec" data-key="efforts">
-      <summary>Interval stretches</summary>
-      <div class="row small">
-        At least <input id="eff-min" type="number" min="1" max="60" step="1" value="8"> min,
-        <select id="eff-terrain" class="inline">
-          <option value="flat">flat</option>
-          <option value="any">any terrain</option>
-          <option value="climb">climbs</option>
-        </select>
-      </div>
-      <p class="hint">Stretches of this route with no traffic lights, stop or give way signs, roundabouts, barriers or sharp turns. Crossings count when you're on a path.</p>
-      <div id="eff-status" class="small"></div>
-      <ul id="efforts" class="stops"></ul>
-    </details>
 
     <details class="sec" data-key="loops">
       <summary>Loop generator</summary>
@@ -174,20 +131,6 @@
       <div class="row buttons"><button id="hist-sync">Sync from intervals.icu</button></div>
     </details>
 
-    <details class="sec" data-key="stops">
-      <summary>Toilets, water &amp; cafés along the route</summary>
-      <div class="row small">Show
-        <label class="check"><input id="st-toilet" type="checkbox" checked> toilets</label>
-        <label class="check"><input id="st-water" type="checkbox" checked> water</label>
-        <label class="check"><input id="st-cafe" type="checkbox" checked> cafés</label>
-      </div>
-      <div class="row small">
-        Within <input id="poi-radius" type="number" min="50" max="1000" step="50" value="250"> m of the route,
-        warn on gaps over <input id="gap-km" type="number" min="5" max="200" step="5" value="25"> km
-      </div>
-      <div id="gaps"></div>
-      <ul id="stops" class="stops"></ul>
-    </details>
 
     <details class="sec" data-key="export" open>
       <summary>Export &amp; save</summary>
@@ -217,33 +160,102 @@
       <div id="rep-status" class="small"></div>
     </details>
 
-    <details class="sec" data-key="map" open>
-      <summary>Map</summary>
-      <label class="check">Background
-        <select id="lyr-base">
-          <option value="map">Map</option>
-          <option value="aerial">Aerial photo (Landgate, sharpest, ~1–2 years old)</option>
-          <option value="satellite">Satellite (Esri, blurrier, sometimes newer)</option>
-        </select></label>
-      <label class="check" id="photo-paths-row" hidden><input id="lyr-photo-paths" type="checkbox" checked> Outline mapped paths on the photo <small>(blue = bike path, yellow = other path)</small></label>
-      <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
-      <label class="check"><input id="md-bus" type="checkbox"> Bus stops</label>
-      <label class="check"><input id="md-rail" type="checkbox" checked> Train stations</label>
-      <label class="check"><input id="md-places" type="checkbox" checked> Shops, cafés &amp; other places</label>
-      <label class="check"><input id="md-streets" type="checkbox" checked> Street names</label>
-      <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets, water &amp; cafés (zoom in to see)</label>
-      <div class="row small">
-        Colour route by
-        <select id="colour-by">
-          <option value="none">nothing</option>
-          <option value="surface">surface</option>
-          <option value="way">way type</option>
-          <option value="wind">wind (red = headwind)</option>
-          <option value="new">new vs ridden roads</option>
-        </select>
-      </div>
-      <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. On a finished loop, a tap adds the point to the nearest part of the loop instead of after the finish. Tap a point to remove it.</p>
+    <details class="sec more" data-key="more">
+      <summary>More</summary>
+      <p class="hint">Map background, stops, interval stretches, road safety, surface, liked roads and no-go areas.</p>
+      <details class="sec" data-key="map" open>
+        <summary>Map</summary>
+        <label class="check">Background
+          <select id="lyr-base">
+            <option value="map">Map</option>
+            <option value="aerial">Aerial photo (Landgate, sharpest, ~1–2 years old)</option>
+            <option value="satellite">Satellite (Esri, blurrier, sometimes newer)</option>
+          </select></label>
+        <label class="check" id="photo-paths-row" hidden><input id="lyr-photo-paths" type="checkbox" checked> Outline mapped paths on the photo <small>(blue = bike path, yellow = other path)</small></label>
+        <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
+        <label class="check"><input id="md-bus" type="checkbox"> Bus stops</label>
+        <label class="check"><input id="md-rail" type="checkbox" checked> Train stations</label>
+        <label class="check"><input id="md-places" type="checkbox" checked> Shops, cafés &amp; other places</label>
+        <label class="check"><input id="md-streets" type="checkbox" checked> Street names</label>
+        <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets, water &amp; cafés (zoom in to see)</label>
+        <div class="row small">
+          Colour route by
+          <select id="colour-by">
+            <option value="none">nothing</option>
+            <option value="surface">surface</option>
+            <option value="way">way type</option>
+            <option value="wind">wind (red = headwind)</option>
+            <option value="new">new vs ridden roads</option>
+          </select>
+        </div>
+        <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. On a finished loop, a tap adds the point to the nearest part of the loop instead of after the finish. Tap a point to remove it.</p>
+      </details>
+
+      <details class="sec" data-key="stops">
+        <summary>Toilets, water &amp; cafés along the route</summary>
+        <div class="row small">Show
+          <label class="check"><input id="st-toilet" type="checkbox" checked> toilets</label>
+          <label class="check"><input id="st-water" type="checkbox" checked> water</label>
+          <label class="check"><input id="st-cafe" type="checkbox" checked> cafés</label>
+        </div>
+        <div class="row small">
+          Within <input id="poi-radius" type="number" min="50" max="1000" step="50" value="250"> m of the route,
+          warn on gaps over <input id="gap-km" type="number" min="5" max="200" step="5" value="25"> km
+        </div>
+        <div id="gaps"></div>
+        <ul id="stops" class="stops"></ul>
+      </details>
+
+      <details class="sec" data-key="efforts">
+        <summary>Interval stretches</summary>
+        <div class="row small">
+          At least <input id="eff-min" type="number" min="1" max="60" step="1" value="8"> min,
+          <select id="eff-terrain" class="inline">
+            <option value="flat">flat</option>
+            <option value="any">any terrain</option>
+            <option value="climb">climbs</option>
+          </select>
+        </div>
+        <p class="hint">Stretches of this route with no traffic lights, stop or give way signs, roundabouts, barriers or sharp turns. Crossings count when you're on a path.</p>
+        <div id="eff-status" class="small"></div>
+        <ul id="efforts" class="stops"></ul>
+      </details>
+
+      <details class="sec" data-key="safety">
+        <summary>Road safety</summary>
+        <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it.</p>
+        <label class="check"><input id="safety-marks" type="checkbox" checked> Warning signs on the map <small>(yellow: main road, red: 80 km/h or more)</small></label>
+      <div id="safety-sum" class="small"></div>
+        <ul id="safety" class="stops"></ul>
+      </details>
+
+      <details class="sec" data-key="surface" open>
+        <summary>Surface</summary>
+        <div id="bd-surface" class="breakdown"></div>
+        <h3>Way type</h3>
+        <div id="bd-way" class="breakdown"></div>
+      </details>
+
+      <details class="sec" data-key="roads">
+        <summary>Roads I like &amp; dislike</summary>
+        <p class="hint">Tap a button, then tap a road on the map. It marks that road up to about 2 km either way. Disliked roads are avoided unless the way around is much longer (a 200 m detour round Roe Street: avoided; a 7 km detour round the Narrows: still used). Liked roads can't pull the router onto them, but the loop generator favours them and snaps loop points onto them, and you'll see how much of each route uses them.</p>
+        <div class="row buttons"><button id="road-like">Mark a road I like</button><button id="road-dislike">Mark a road I dislike</button></div>
+        <div id="road-sum" class="small"></div>
+        <ul id="roads" class="stops"></ul>
+      </details>
+
+      <details class="sec" data-key="nogo">
+        <summary>No-go areas</summary>
+        <p class="hint">Circles the router stays out of, like a nasty intersection or a road you hate. "Avoid completely" never enters; "prefer to avoid" goes around unless the detour is more than about ten times the distance inside the circle. Saved on the server, so they apply on every device.</p>
+        <div class="row small">
+          Size <select id="nogo-radius" class="inline"><option value="60">small (60 m)</option><option value="150" selected>medium (150 m)</option><option value="400">large (400 m)</option></select>
+          <select id="nogo-mode" class="inline"><option value="hard">avoid completely</option><option value="soft">prefer to avoid</option></select>
+        </div>
+        <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
+        <ul id="nogos" class="stops"></ul>
+      </details>
     </details>
+
   </div>
 </aside>
 

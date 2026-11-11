@@ -196,8 +196,9 @@ function onMapClick(e) {
   const poiHit = hits.find((f) => f.layer.id === 'pois');
   if (poiHit) { showPoiPopup(pois.get(poiHit.properties.id)); return; }
   const lngLat = { lng: e.lngLat.lng, lat: e.lngLat.lat };
-  if (hits.some((f) => f.layer.id === 'route-hit') && route && waypoints.length >= 2) {
-    insertVia(lngLat);
+  const closedLoop = waypoints.length >= 3 && haversine([waypoints[0].lng, waypoints[0].lat], [waypoints[waypoints.length - 1].lng, waypoints[waypoints.length - 1].lat]) < 30;
+  if ((hits.some((f) => f.layer.id === 'route-hit') || closedLoop) && route && waypoints.length >= 2) {
+    insertVia(lngLat); // on a finished loop, never add a point past the finish
   } else {
     setWaypoints([...waypoints, lngLat]);
   }

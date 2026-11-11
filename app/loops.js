@@ -100,8 +100,9 @@ function repeatShare(rt) {
 // Measure that spike at each point (how far the way in and the way out run together) ...
 function pointAt(rt, m) {
   m = Math.max(0, Math.min(rt.cum[rt.cum.length - 1], m));
-  let i = 0;
-  while (i < rt.cum.length - 2 && rt.cum[i + 1] < m) i++;
+  let lo = 0, hi = rt.cum.length - 2;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (rt.cum[mid] <= m) lo = mid; else hi = mid - 1; }
+  const i = lo;
   const span = rt.cum[i + 1] - rt.cum[i] || 1, t = (m - rt.cum[i]) / span;
   return [rt.coords[i][0] + t * (rt.coords[i + 1][0] - rt.coords[i][0]), rt.coords[i][1] + t * (rt.coords[i + 1][1] - rt.coords[i][1])];
 }
@@ -117,6 +118,20 @@ function spikes(rt, pts) {
   }
   return out;
 }
+// U-turns anywhere on the route (e.g. riding up a path to a crossing and back down the other side).
+function uturns(rt, minLen = 100) {
+  const out = [];
+  const L = rt.cum[rt.cum.length - 1];
+  let s = 50;
+  while (s < L - 50) {
+    let d = 0;
+    while (d < 3000 && haversine(pointAt(rt, s - d - 10), pointAt(rt, s + d + 10)) < 25) d += 10;
+    if (d >= minLen) { out.push({ at: s, len: d }); s += d + 50; } else s += 20;
+  }
+  return out;
+}
+const uturnMetres = (rt) => uturns(rt).reduce((a, u) => a + u.len, 0);
+
 // ... and move the point back to where its spike leaves the through road, then reroute.
 async function trimSpikes(pts, rt, profile) {
   for (let round = 0; round < 2; round++) {
@@ -139,10 +154,11 @@ async function routeCircle(start, brg, radius, profile) {
 async function makeLoop(start, brg, target, profile) {
   let radius = target / (2 * Math.PI * 1.3); // roads are ~30% longer than the circle
   let best = null;
-  const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0);
+  const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
   const consider = (c) => {
     c.err = Math.abs(c.rt.length - target) / target;
     c.repeat = repeatShare(c.rt);
+    c.uturn = uturnMetres(c.rt);
     c.brg = brg;
     if (!best || badness(c) < badness(best)) best = c;
   };
@@ -160,6 +176,12 @@ async function makeLoop(start, brg, target, profile) {
       catch { /* that variation hit the sea or similar */ }
     }
   }
+  // U-turns: try the circle turned a little each way and keep the cleanest.
+  for (const turn of [12, -12, 25, -25]) {
+    if (best.uturn === 0) break;
+    try { consider(await routeCircle(start, (brg + turn + 360) % 360, radius, profile)); }
+    catch { /* that variation hit the sea or similar */ }
+  }
   return best;
 }
 
@@ -174,6 +196,7 @@ function loopScore(l) {
   let s = l.err * 100;
   if (lp('lp-quiet')) s += l.mainPct * 0.3;
   if (lp('lp-noback')) s += l.repeat * 0.5;
+  s += l.uturn / 20; // every 100 m of U-turn costs as much as 5% off the target distance
   if (lp('lp-climb')) { const t = +$('lp-climb-m').value || 400; s += (Math.abs(l.rt.ascend - t) / t) * 40; }
   const nov = $('lp-novelty').value;
   if (nov !== 'off' && l.newPct != null) s += (nov === 'new' ? -1 : 1) * l.newPct * 0.3;
@@ -209,6 +232,7 @@ function renderLoops() {
     const li = document.createElement('li');
     const bits = [`${Math.round(l.rt.ascend)} m up`, `${Math.round(l.mainPct)}% main road`];
     if (l.repeat >= 3) bits.push(`${Math.round(l.repeat)}% repeated`);
+    if (l.uturn) bits.push(`<span class="badge warn">${l.uturn} m of U-turns</span>`);
     if (l.newPct != null) bits.push(`${Math.round(l.newPct)}% new`);
     if (l.interval) bits.push(`${l.interval.mins} min stretch`);
     if (l.liked && l.liked.pct >= 1) bits.push(`${Math.round(l.liked.pct)}% liked roads`);
@@ -229,7 +253,7 @@ function renderLoops() {
         targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
         switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked'].map((id) => [id, lp(id)])),
         climbTarget: +$('lp-climb-m').value, intervalMin: +$('lp-interval-min').value, novelty: $('lp-novelty').value,
-        stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), newPct: l.newPct == null ? null : Math.round(l.newPct) },
+        stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), uturnM: l.uturn, newPct: l.newPct == null ? null : Math.round(l.newPct) },
         waypoints: l.pts,
       };
     };

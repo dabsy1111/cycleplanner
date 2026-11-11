@@ -913,8 +913,31 @@ function applyBase() {
   $('photo-paths-row').hidden = b === 'map';
   // The base map's 3D buildings would sit on top of the photo.
   for (const l of map.getStyle().layers) if (l.type === 'fill-extrusion') map.setLayoutProperty(l.id, 'visibility', b === 'map' ? 'visible' : 'none');
+  if (b !== 'map') store.set('cp.photo', b); // remembered for the map button
+  const btn = document.querySelector('.base-toggle');
+  if (btn) {
+    btn.classList.toggle('on', b !== 'map');
+    btn.title = b === 'map' ? 'Show the aerial photo' : 'Back to the map';
+    btn.setAttribute('aria-pressed', b !== 'map');
+  }
 }
 $('lyr-base').onchange = () => { store.set('cp.base', $('lyr-base').value); applyBase(); };
+// Map / photo button on the map itself. It flips to whichever photo you last used (aerial by default).
+map.addControl({
+  onAdd() {
+    const div = document.createElement('div');
+    div.className = 'maplibregl-ctrl maplibregl-ctrl-group';
+    div.innerHTML = '<button type="button" class="base-toggle" title="Show the aerial photo" aria-pressed="false">' +
+      '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5Z"/><path d="m2 13 10 5 10-5"/></svg></button>';
+    div.firstChild.onclick = () => {
+      const sel = $('lyr-base');
+      sel.value = sel.value === 'map' ? store.get('cp.photo', 'aerial') : 'map';
+      sel.onchange();
+    };
+    return div;
+  },
+  onRemove() {},
+}, 'top-right');
 $('lyr-photo-paths').onchange = () => { store.set('cp.photo-paths', $('lyr-photo-paths').checked); applyBase(); };
 $('lyr-cyclosm').onchange = (e) => { store.set('cp.cyclosm', e.target.checked); map.setLayoutProperty('cyclosm', 'visibility', e.target.checked ? 'visible' : 'none'); };
 $('lyr-poi').onchange = (e) => {

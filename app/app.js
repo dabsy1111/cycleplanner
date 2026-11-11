@@ -5,10 +5,14 @@
 const BROUTER_URL = '/brouter';
 const BASE_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 // Map tiles go through the server's cache (nginx /tiles/...), so the map still works if a tile service is down.
+const LANDGATE = 'https://public-services.slip.wa.gov.au/public/rest/services/SLIP_Public_Services/Locate/MapServer/export';
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/';
 function viaTileCache(url) {
   if (url.startsWith('https://tiles.openfreemap.org/')) return { url: `${location.origin}/tiles/ofm/${url.slice(30)}` };
   const m = /^https:\/\/[abc]\.tile-cyclosm\.openstreetmap\.fr\/cyclosm\/(.*)$/.exec(url);
   if (m) return { url: `${location.origin}/tiles/cyclosm/${m[1]}` };
+  if (url.startsWith(LANDGATE)) return { url: `${location.origin}/tiles/landgate/${url.slice(LANDGATE.length)}` };
+  if (url.startsWith(ESRI)) return { url: `${location.origin}/tiles/esri/${url.slice(ESRI.length)}` };
   return { url };
 }
 // Our server caches Overpass answers for a week; the public servers are the fallback.
@@ -149,6 +153,32 @@ map.on('load', () => {
     attribution: '<a href="https://www.cyclosm.org">CyclOSM</a> | © OpenStreetMap contributors',
   });
   map.addLayer({ id: 'cyclosm', type: 'raster', source: 'cyclosm', layout: { visibility: 'none' } });
+
+  // Photo backgrounds. They sit under the street names so you can still read where you are.
+  const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
+  map.addSource('aerial', {
+    // Landgate's free WA aerial mosaic: about 7.5–15 cm per pixel over Perth, at least ~a year old.
+    // It isn't pre-tiled, so each tile is drawn on request (512 px for sharp phone screens) and cached by the server.
+    type: 'raster', tileSize: 256, minzoom: 10, maxzoom: 21,
+    tiles: [`${LANDGATE}?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=jpg&f=image`],
+    attribution: 'Aerial imagery © <a href="https://www.landgate.wa.gov.au">Landgate</a> / SLIP',
+  });
+  map.addLayer({ id: 'aerial', type: 'raster', source: 'aerial', layout: { visibility: 'none' } }, firstLabel);
+  map.addSource('satellite', {
+    type: 'raster', tileSize: 256, maxzoom: 19,
+    tiles: [`${ESRI}{z}/{y}/{x}`],
+    attribution: 'Imagery © Esri, Maxar, Earthstar Geographics',
+  });
+  map.addLayer({ id: 'satellite', type: 'raster', source: 'satellite', layout: { visibility: 'none' } }, firstLabel);
+  // OSM's bike paths and footpaths drawn over the photo, so you can check them against what's really there.
+  map.addLayer({ id: 'photo-paths', type: 'line', source: 'openmaptiles', 'source-layer': 'transportation',
+    filter: ['==', ['get', 'class'], 'path'],
+    layout: { visibility: 'none', 'line-cap': 'round' },
+    paint: {
+      'line-color': ['match', ['get', 'subclass'], 'cycleway', '#22d3ee', '#fde047'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 14, ['match', ['get', 'subclass'], 'cycleway', 2, 1], 19, ['match', ['get', 'subclass'], 'cycleway', 5, 2.5]],
+      'line-dasharray': [2, 1.5], 'line-opacity': ['match', ['get', 'subclass'], 'cycleway', 0.95, 0.6],
+    } }, firstLabel);
 
   map.addSource('route', { type: 'geojson', data: emptyFC() });
   map.addLayer({ id: 'route-casing', type: 'line', source: 'route',
@@ -875,6 +905,17 @@ $('opt-traffic').onchange = () => { store.set('cp.traffic', $('opt-traffic').val
 $('profile').onchange = () => { store.set('cp.profile', $('profile').value); writeHash(); requestRoute(false); };
 $('speed').oninput = () => { store.set('cp.speed', $('speed').value); renderStats(); };
 $('colour-by').onchange = () => { store.set('cp.colour', $('colour-by').value); if (map.getSource('route')) map.getSource('route').setData(routeFeatures()); };
+function applyBase() {
+  const b = $('lyr-base').value;
+  map.setLayoutProperty('aerial', 'visibility', b === 'aerial' ? 'visible' : 'none');
+  map.setLayoutProperty('satellite', 'visibility', b === 'satellite' ? 'visible' : 'none');
+  map.setLayoutProperty('photo-paths', 'visibility', b !== 'map' && $('lyr-photo-paths').checked ? 'visible' : 'none');
+  $('photo-paths-row').hidden = b === 'map';
+  // The base map's 3D buildings would sit on top of the photo.
+  for (const l of map.getStyle().layers) if (l.type === 'fill-extrusion') map.setLayoutProperty(l.id, 'visibility', b === 'map' ? 'visible' : 'none');
+}
+$('lyr-base').onchange = () => { store.set('cp.base', $('lyr-base').value); applyBase(); };
+$('lyr-photo-paths').onchange = () => { store.set('cp.photo-paths', $('lyr-photo-paths').checked); applyBase(); };
 $('lyr-cyclosm').onchange = (e) => { store.set('cp.cyclosm', e.target.checked); map.setLayoutProperty('cyclosm', 'visibility', e.target.checked ? 'visible' : 'none'); };
 $('lyr-poi').onchange = (e) => {
   store.set('cp.poi', e.target.checked);
@@ -938,6 +979,9 @@ function restoreSettings() {
   if (!$('profile').value) $('profile').value = 'fastbike';
   $('speed').value = store.get('cp.speed', 27);
   $('colour-by').value = store.get('cp.colour', 'none');
+  $('lyr-base').value = store.get('cp.base', 'map');
+  $('lyr-photo-paths').checked = store.get('cp.photo-paths', true);
+  applyBase();
   const cyc = store.get('cp.cyclosm', false);
   $('lyr-cyclosm').checked = cyc;
   map.setLayoutProperty('cyclosm', 'visibility', cyc ? 'visible' : 'none');

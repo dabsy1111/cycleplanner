@@ -307,15 +307,22 @@ function renderLoops() {
   loopResults.forEach((l, k) => {
     const li = document.createElement('li');
     if (k === loopPicked) li.classList.add('picked');
-    const bits = [`${Math.round(l.rt.ascend)} m up`, `${Math.round(l.mainPct)}% main road`];
-    if (l.repeat >= 3) bits.push(`${Math.round(l.repeat)}% repeated`);
-    if (l.uturn) bits.push(`<span class="badge warn">${l.uturn} m of U-turns</span>`);
-    if (l.newPct != null) bits.push(`${Math.round(l.newPct)}% new`);
-    if (l.interval) bits.push(`${l.interval.mins} min stretch`);
-    if (l.liked && l.liked.pct >= 1) bits.push(`${Math.round(l.liked.pct)}% liked roads`);
-    li.innerHTML = `<span class="km">${fmtKm(l.rt.length)}</span>` +
-      `<span>${k === 0 ? '<span class="tag">best match</span> ' : ''}${l.through ? `Out via the ${compass(l.brg)} side` : `Heads ${compass(l.brg)}`} · ${bits.join(' · ')}</span>` +
-      `<span class="off">${l.wind ? fmtWind(l.wind.second).replace('wind', 'wind home') : ''}</span>`;
+    const lines = [
+      `<div class="head">${l.through ? `Out via the ${compass(l.brg)} side` : `Heads ${compass(l.brg)}`}</div>`,
+      `<div>${Math.round(l.rt.ascend)} m up</div>`,
+      `<div>${Math.round(l.mainPct)}% main road</div>`,
+    ];
+    if (l.repeat >= 3) lines.push(`<div>${Math.round(l.repeat)}% ridden twice</div>`);
+    if (l.uturn) lines.push(`<div><span class="badge warn">${l.uturn} m of U-turns</span></div>`);
+    if (l.newPct != null) lines.push(`<div>${Math.round(l.newPct)}% roads you haven't ridden</div>`);
+    if (l.interval) lines.push(`<div>${l.interval.mins} min interval stretch</div>`);
+    if (l.liked && l.liked.pct >= 1) lines.push(`<div>${Math.round(l.liked.pct)}% roads you like</div>`);
+    if (l.wind) {
+      const w = fmtWind(l.wind.second).replace('wind', 'wind home');
+      lines.push(`<div class="${/tail/.test(w) ? 'wind-good' : /head/.test(w) ? 'wind-bad' : ''}">${w}</div>`);
+    }
+    li.innerHTML = `<span class="km">${fmtKm(l.rt.length)}<small>km</small>${k === 0 ? '<span class="tag">best match</span>' : ''}</span>` +
+      `<div class="facts">${lines.join('')}</div>`;
     li.onmouseenter = () => showLoopPreview(k);
     li.onmouseleave = () => showLoopPreview(-1);
     li.onclick = () => {

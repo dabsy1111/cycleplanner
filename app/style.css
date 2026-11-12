@@ -20,7 +20,7 @@ html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, -apple-system, "
 }
 /* Desktop: left column */
 @media (min-width: 760px) {
-  #panel { top: 10px; left: 10px; bottom: 10px; width: 360px; border-radius: 10px; }
+  #panel { top: 10px; left: 10px; bottom: 10px; width: 400px; border-radius: 10px; }
   #handle { display: none; }
 }
 /* Phone: bottom sheet */
@@ -187,3 +187,14 @@ textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-
 
 .base-toggle { display: flex; align-items: center; justify-content: center; color: #333; }
 .base-toggle.on { background: #1c7ed6 !important; color: #fff; }
+
+/* Loop results: one fact per line. */
+#loops li { display: grid; grid-template-columns: 74px 1fr; column-gap: 10px; padding: 8px 0; }
+#loops li .km { width: auto; font-size: 16px; }
+#loops li .km small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+#loops li .km .tag { display: inline-block; margin: 4px 0 0; font-weight: 400; white-space: nowrap; }
+#loops li .facts { line-height: 1.45; }
+#loops li .facts .head { font-weight: 600; }
+#loops li .facts .wind-good { color: #2b8a3e; }
+#loops li .facts .wind-bad { color: #c92a2a; }
+#loops li .facts .badge { margin-left: 0; }

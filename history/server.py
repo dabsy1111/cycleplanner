@@ -467,20 +467,32 @@ def overpass_query(q):
 # ---------- bike paths: a local copy for the loop generator ----------
 # One Overpass download of every bike path in the area, refreshed weekly, so the loop
 # generator doesn't wait on Overpass every time it snaps points to paths.
-BIKEPATHS = os.path.join(os.environ.get("DATA_DIR", "/data"), "bikepaths.json")
+BIKEPATH_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "bikepaths")
 BIKEPATH_BBOX = os.environ.get("BIKEPATH_BBOX", "-32.80,115.55,-31.40,116.30")  # south,west,north,east: Mandurah to Two Rocks, coast to the hills
 BIKEPATH_DAYS = float(os.environ.get("BIKEPATH_DAYS", "7"))
 BP_CELL = 0.005  # must match SNAP_CELL in app/loops.js
-bikepaths = {"cells": None, "updated": None, "error": None}
+BP_STEP = 0.25   # downloaded in ~25 km tiles: one query for the whole area is too big for Overpass
+# Each tile is saved as soon as it arrives, so a restart (e.g. an update) carries on where it
+# left off instead of starting again, and finished tiles are used straight away.
+bikepaths = {"tiles": {}, "error": None}
+bp_lock = threading.Lock()
 
 
-def _load_bikepaths():
-    try:
-        with open(BIKEPATHS) as f:
-            d = json.load(f)
-        bikepaths["cells"], bikepaths["updated"] = d["cells"], d["updated"]
-    except (OSError, ValueError, KeyError):
-        pass
+def _bp_tiles():
+    s, w, n, e = [float(v) for v in BIKEPATH_BBOX.split(",")]
+    out = []
+    lat = s
+    while lat < n - 1e-9:
+        lng = w
+        while lng < e - 1e-9:
+            out.append((round(lat, 4), round(lng, 4), round(min(n, lat + BP_STEP), 4), round(min(e, lng + BP_STEP), 4)))
+            lng += BP_STEP
+        lat += BP_STEP
+    return out
+
+
+def _bp_file(t):
+    return os.path.join(BIKEPATH_DIR, "%.4f_%.4f_%.4f_%.4f.json" % t)
 
 
 def _overpass_ways(bbox):
@@ -506,62 +518,79 @@ out skel geom;"""
     raise RuntimeError(str(last))
 
 
+def _load_bikepaths():
+    os.makedirs(BIKEPATH_DIR, exist_ok=True)
+    for t in _bp_tiles():
+        try:
+            with open(_bp_file(t)) as f:
+                bikepaths["tiles"][t] = json.load(f)
+        except (OSError, ValueError):
+            pass
+    print(f"bike paths: {len(bikepaths['tiles'])} of {len(_bp_tiles())} tiles on disk", flush=True)
+
+
 def refresh_bikepaths():
-    # The whole area in one query is too big for Overpass, so fetch it in ~25 km tiles.
-    s, w, n, e = [float(v) for v in BIKEPATH_BBOX.split(",")]
-    STEP = 0.25
-    cells, ways = {}, 0
-    lat = s
-    try:
-        while lat < n:
-            lng = w
-            while lng < e:
-                tile = f"{lat:.4f},{lng:.4f},{min(n, lat + STEP):.4f},{min(e, lng + STEP):.4f}"
-                for el in _overpass_ways(tile):
-                    ways += 1
-                    for g in el.get("geometry") or []:
-                        k = f"{math.floor(g['lon'] / BP_CELL)}:{math.floor(g['lat'] / BP_CELL)}"
-                        cells.setdefault(k, []).append([round(g["lon"], 5), round(g["lat"], 5)])
-                time.sleep(2)  # be polite to the public server
-                lng += STEP
-            lat += STEP
-    except RuntimeError as err:
-        bikepaths["error"] = f"download failed: {err}"[:200]
-        print(f"bike paths: download failed ({err}), keeping the old copy", flush=True)
-        return
-    if ways < 100:  # a broken answer: keep the copy we have
-        bikepaths["error"] = f"only {ways} paths returned"
-        return
-    updated = time.strftime("%Y-%m-%d %H:%M", time.localtime())
-    _write_json(BIKEPATHS, {"updated": updated, "bbox": BIKEPATH_BBOX, "cells": cells})
-    bikepaths.update(cells=cells, updated=updated, error=None)
-    print(f"bike paths: {ways} ways, {len(cells)} cells", flush=True)
+    """Download any tile that's missing or older than BIKEPATH_DAYS."""
+    fetched = 0
+    for t in _bp_tiles():
+        path = _bp_file(t)
+        if os.path.exists(path) and time.time() - os.stat(path).st_mtime < BIKEPATH_DAYS * 86400:
+            continue
+        try:
+            els = _overpass_ways("%.4f,%.4f,%.4f,%.4f" % t)
+        except RuntimeError as err:
+            bikepaths["error"] = f"download failed: {err}"[:200]
+            print(f"bike paths: tile {t} failed ({err}); will retry", flush=True)
+            return
+        cells = {}
+        for el in els:
+            for g in el.get("geometry") or []:
+                k = f"{math.floor(g['lon'] / BP_CELL)}:{math.floor(g['lat'] / BP_CELL)}"
+                cells.setdefault(k, []).append([round(g["lon"], 5), round(g["lat"], 5)])
+        tile = {"updated": time.strftime("%Y-%m-%d %H:%M", time.localtime()), "ways": len(els), "cells": cells}
+        _write_json(path, tile)
+        with bp_lock:
+            bikepaths["tiles"][t] = tile
+        fetched += 1
+        time.sleep(2)  # be polite to the public server
+    bikepaths["error"] = None
+    if fetched:
+        print(f"bike paths: refreshed {fetched} tiles", flush=True)
 
 
 def bikepath_scheduler():
     _load_bikepaths()
     while True:
         try:
-            fresh = os.path.exists(BIKEPATHS) and time.time() - os.stat(BIKEPATHS).st_mtime < BIKEPATH_DAYS * 86400
-            if not fresh:
-                refresh_bikepaths()
+            refresh_bikepaths()
         except Exception as e:
             bikepaths["error"] = str(e)[:200]
-        time.sleep(3600)  # checks hourly; it only downloads once the copy is a week old (or missing)
+        time.sleep(3600)  # checks hourly; a tile is only downloaded again once it's a week old
 
 
 def bikepaths_in(bbox):
-    cells = bikepaths["cells"]
-    if cells is None:
-        return None
+    """Cells inside bbox, and whether every tile it touches has been downloaded."""
     s, w, n, e = bbox
-    out = {}
-    for cx in range(math.floor(w / BP_CELL), math.floor(e / BP_CELL) + 1):
-        for cy in range(math.floor(s / BP_CELL), math.floor(n / BP_CELL) + 1):
-            pts = cells.get(f"{cx}:{cy}")
-            if pts:
-                out[f"{cx}:{cy}"] = pts
-    return out
+    with bp_lock:
+        tiles = dict(bikepaths["tiles"])
+    covered, oldest, out = True, None, {}
+    inside_area = False
+    for t in _bp_tiles():
+        if t[0] > n or t[2] < s or t[1] > e or t[3] < w:
+            continue
+        inside_area = True
+        tile = tiles.get(t)
+        if not tile:
+            covered = False
+            continue
+        oldest = min(oldest or tile["updated"], tile["updated"])
+        for k, pts in tile["cells"].items():
+            cx, cy = (int(v) for v in k.split(":"))
+            if w / BP_CELL - 1 <= cx <= e / BP_CELL and s / BP_CELL - 1 <= cy <= n / BP_CELL:
+                out.setdefault(k, []).extend(pts)
+    as_, aw, an, ae = [float(v) for v in BIKEPATH_BBOX.split(",")]
+    covered = covered and inside_area and s >= as_ and w >= aw and n <= an and e <= ae
+    return {"covered": covered, "updated": oldest, "cells": out}
 
 
 def scheduler():
@@ -619,13 +648,11 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, AssertionError):
                 self.send(400, b'{"error":"bbox=s,w,n,e"}')
                 return
-            cells = bikepaths_in(bbox)
-            if cells is None:
-                self.send(503, json.dumps({"error": bikepaths["error"] or "still downloading"}).encode())
+            r = bikepaths_in(bbox)
+            if not r["covered"]:
+                self.send(503, json.dumps({"error": bikepaths["error"] or "not downloaded yet for this area"}).encode())
                 return
-            s, w, n, e = [float(v) for v in BIKEPATH_BBOX.split(",")]
-            covered = bbox[0] >= s and bbox[1] >= w and bbox[2] <= n and bbox[3] <= e
-            self.send(200, json.dumps({"updated": bikepaths["updated"], "covered": covered, "cells": cells}, separators=(",", ":")).encode())
+            self.send(200, json.dumps(r, separators=(",", ":")).encode())
         elif path == "/api/history/tracks":
             self.send(200, tracks_body())
         else:

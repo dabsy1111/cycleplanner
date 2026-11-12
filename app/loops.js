@@ -164,45 +164,63 @@ async function routeCircle(start, brg, radius, profile) {
 }
 
 // ---------- loops through a chosen point ----------
-// Start A, turnaround B, and a point out to each side of the line A-B, so you ride out one way
-// and home another. A shape is [f1, f2, s]: how far along A-B each side point sits, and how
-// the width is split between the two sides.
-const THROUGH_SHAPES = [[0.5, 0.5, 0.5], [0.5, 0.5, 0.2], [0.5, 0.5, 0.8], [0.35, 0.65, 0.5],
-  [0.65, 0.35, 0.5], [0.35, 0.35, 0.5], [0.65, 0.65, 0.5], [0.5, 0.5, 0.05]];
+// A round loop from the start A that passes through your point B. The loop is drawn around a
+// centre C: the radius blends smoothly from |CA| to |CB| so the curve hits both. Moving C off
+// the middle of A-B in different directions gives different loops; the further C goes, the
+// bigger (and rounder) the loop. (Two side points, as first built, made thin out-and-back
+// spikes when B was close to home.)
+const THROUGH_DIRS = [0, 45, 90, 135, 180, 225, 270, 315];
 
-function throughPoints(A, B, shape, width) {
-  const brg = bearing(A, B), c = haversine(A, B), [f1, f2, s] = shape;
-  const side = (f, w, dir) => destination(destination(A, brg, c * f), (brg + dir + 360) % 360, w);
-  return [A, side(f1, width * s, 90), B, side(f2, width * (1 - s), -90), A];
+function throughPoints(A, B, dir, d) {
+  const M = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+  const C = d > 0 ? destination(M, dir, d) : M;
+  const tA = bearing(C, A), tB = bearing(C, B), rA = haversine(C, A), rB = haversine(C, B);
+  const span = (tB - tA + 360) % 360; // clockwise from A to B
+  const ease = (t) => (1 - Math.cos(Math.PI * t)) / 2;
+  const at = (phi) => { // phi: degrees clockwise from A
+    const r = phi <= span ? rA + (rB - rA) * ease(phi / (span || 1)) : rB + (rA - rB) * ease((phi - span) / (360 - span || 1));
+    return destination(C, (tA + phi) % 360, r);
+  };
+  const out = [A];
+  let bIndex = -1;
+  for (const phi of [90, 180, 270]) {
+    if (bIndex < 0 && phi > span) { out.push(B); bIndex = out.length - 1; }
+    if (Math.abs(phi - span) > 35) out.push(at(phi));
+  }
+  if (bIndex < 0) { out.push(B); bIndex = out.length - 1; }
+  out.push(A);
+  return { pts: out, bIndex };
 }
 function pathLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += haversine(pts[i - 1], pts[i]); return L; }
-// Width that makes the straight-line shape this long (it only grows with width, so bisect).
-function widthFor(A, B, shape, len) {
-  let lo = 0, hi = len;
-  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pathLength(throughPoints(A, B, shape, mid)) < len) lo = mid; else hi = mid; }
+// How far to move the centre so the straight-line loop is this long (bisect; length grows with d).
+function offsetFor(A, B, dir, len) {
+  let lo = 0, hi = Math.max(len, 1000);
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pathLength(throughPoints(A, B, dir, mid).pts) < len) lo = mid; else hi = mid; }
   return lo;
 }
-async function routeThrough(A, B, shape, width, profile) {
-  let pts = throughPoints(A, B, shape, width);
-  if (lp('lp-snap')) pts = pts.map((p, i) => (i === 1 || i === 3 ? snapPoint(p) : p));
-  return trimSpikes(pts, await fetchRoute(pts, profile), profile, [2]);
+// Shortest sensible loop through B, with some slack so the loops can differ from each other.
+const minThroughKm = (A, B) => (pathLength(throughPoints(A, B, 0, 0).pts) * 1.3 * 1.15) / 1000;
+async function routeThrough(A, B, dir, d, profile) {
+  let { pts, bIndex } = throughPoints(A, B, dir, d);
+  if (lp('lp-snap')) pts = pts.map((p, i) => (i > 0 && i < pts.length - 1 && i !== bIndex ? snapPoint(p) : p));
+  const l = await trimSpikes(pts, await fetchRoute(pts, profile), profile, [bIndex]);
+  l.bIndex = bIndex;
+  return l;
 }
-async function makeThroughLoop(A, B, shape, target, profile) {
-  const c = haversine(A, B);
-  const minWidth = c * 0.3; // narrower than this and out and back share the same roads
+async function makeThroughLoop(A, B, dir, target, profile) {
   let len = target / 1.3; // roads are ~30% longer than straight lines
   let best = null;
   const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const width = Math.max(minWidth, widthFor(A, B, shape, len));
-    const l = await routeThrough(A, B, shape, width, profile);
+    const d = offsetFor(A, B, dir, len);
+    const l = await routeThrough(A, B, dir, d, profile);
     l.err = Math.abs(l.rt.length - target) / target;
     l.repeat = repeatShare(l.rt);
     l.uturn = uturnMetres(l.rt);
     l.brg = bearing(A, l.pts[1]);
     l.through = true;
     if (!best || badness(l) < badness(best)) best = l;
-    if (l.err < 0.07 || (width === minWidth && l.rt.length > target)) break;
+    if (l.err < 0.07 || (d === 0 && l.rt.length > target)) break;
     len *= target / l.rt.length;
   }
   return best;
@@ -308,7 +326,7 @@ function renderLoops() {
       if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
       const last = l.pts.length - 1;
       // The point you chose to loop through stays exactly where you put it.
-      setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === 2) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
+      setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === l.bIndex) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
         targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
         switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through'].map((id) => [id, lp(id)])),
@@ -348,12 +366,12 @@ async function generateLoops() {
     const own = waypoints.slice(1).find((w) => !w.auto && haversine(start, [w.lng, w.lat]) > 30);
     const B = lp('lp-through') && own ? [own.lng, own.lat] : null;
     if (B && haversine(start, B) < 300) { st.textContent = 'Your second point is too close to the start to loop through. Move it, or untick "Loop through my second point".'; return; }
-    if (B && haversine(start, B) * 2 * 1.2 > target) {
-      $('loop-km').value = Math.ceil((haversine(start, B) * 2 * 1.45) / 5000) * 5;
+    if (B && minThroughKm(start, B) * 1000 > target) {
+      $('loop-km').value = Math.ceil(minThroughKm(start, B) / 5) * 5;
       note = `Your point is ${fmtKm(haversine(start, B))} km away, so loops through it are about ${$('loop-km').value} km.`;
     }
-    const tgt = B ? Math.max(target, haversine(start, B) * 2 * 1.45) : target;
-    const bearings = B ? THROUGH_SHAPES : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
+    const tgt = B ? Math.max(target, minThroughKm(start, B) * 1000) : target;
+    const bearings = B ? THROUGH_DIRS : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
     const found = [];
     let done = 0;
     st.textContent = `Working… 0 of ${bearings.length}`;
@@ -369,6 +387,7 @@ async function generateLoops() {
             if (rev.second < fwd.second - 1) {
               l.pts = [...l.pts].reverse();
               l.rt = await fetchRoute(l.pts, profile);
+              if (l.through) l.bIndex = l.pts.length - 1 - l.bIndex;
               l.err = Math.abs(l.rt.length - tgt) / tgt;
               l.wind = windStats(l.rt);
             } else l.wind = fwd;
@@ -401,7 +420,13 @@ async function generateLoops() {
         if (!list.length) note = `None of the loops has an uninterrupted ${mins} min stretch. Try a shorter interval or a longer loop.`;
       } catch (e) { note = 'Could not check interval stretches: ' + e.message; list = found; }
     }
-    loopResults = list.sort((a, b) => loopScore(a) - loopScore(b)).slice(0, 6);
+    list.sort((a, b) => loopScore(a) - loopScore(b));
+    // Drop near-copies (common when every direction ends up on the same roads)...
+    const distinct = [];
+    for (const l of list) if (!distinct.some((d) => sameRoute(d.rt, l.rt))) distinct.push(l);
+    // ...and loops with long U-turns when there are enough clean ones.
+    const clean = distinct.filter((l) => l.uturn < 500);
+    loopResults = (clean.length >= 3 ? clean : distinct).slice(0, 6);
     renderLoops();
     showLoopPreview();
     if (loopResults.length) {

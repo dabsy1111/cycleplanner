@@ -262,6 +262,9 @@
         <summary>Regions (routing data)</summary>
         <p class="hint">Routing needs map data for the area, in 5° × 5° squares (about 500 km across). Perth is E115_S35. If you plan a route somewhere new you'll be offered the download; or pan the map there and press the button. Downloaded regions are kept up to date weekly.</p>
         <div class="row buttons"><button id="region-here">Download the area in the middle of the map</button></div>
+        <div class="row small">Clear regions not used for
+          <select id="region-age" class="inline"><option value="30">a month</option><option value="90" selected>3 months</option><option value="180">6 months</option><option value="0">any time (all but home)</option></select>
+          <button id="region-clear" class="linkbtn">Clear</button></div>
         <div id="region-note" class="small"></div>
         <ul id="regions" class="stops"></ul>
       </details>

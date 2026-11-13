@@ -602,6 +602,27 @@ SEG_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "segments")
 SEGMENTS_URL = os.environ.get("SEGMENTS_URL", "https://brouter.de/brouter/segments4")
 TILE_RE = re.compile(r"^[EW](\d{1,3})_[NS](\d{1,2})$")
 seg_jobs = {}  # tile -> {"done": bytes, "total": bytes, "error": str|None}
+# When each region was last routed in (the app reports it), so unused ones can be cleared.
+REGIONS_USED = os.path.join(os.environ.get("DATA_DIR", "/data"), "regions-used.json")
+used_lock = threading.Lock()
+
+
+def _read_used():
+    try:
+        with open(REGIONS_USED) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def mark_used(tiles):
+    with used_lock:
+        used = _read_used()
+        today = time.strftime("%Y-%m-%d", time.localtime())
+        for t in tiles:
+            if valid_tile(t):
+                used[t] = today
+        _write_json(REGIONS_USED, used)
 
 
 def valid_tile(t):
@@ -620,6 +641,14 @@ def regions_list():
             st = os.stat(os.path.join(SEG_DIR, n))
             out.append({"tile": n[:-4], "mb": round(st.st_size / 1e6, 1),
                         "updated": time.strftime("%Y-%m-%d", time.localtime(st.st_mtime))})
+    # Regions with no record yet (from before this was tracked) count as used today.
+    used = _read_used()
+    missing = [r["tile"] for r in out if r["tile"] not in used]
+    if missing:
+        mark_used(missing)
+        used = _read_used()
+    for r in out:
+        r["lastUsed"] = used.get(r["tile"])
     return {"tiles": out, "downloading": seg_jobs}
 
 
@@ -746,6 +775,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path.split("?")[0].rstrip("/") == "/api/regions/used":
+            try:
+                tiles = self.body_json()
+                assert isinstance(tiles, list) and len(tiles) < 50
+            except Exception:
+                self.send(400, b'{"error":"expected a list of tiles"}')
+                return
+            mark_used([t for t in tiles if isinstance(t, str)])
+            self.send(204, b"")
+            return
         if self.path.split("?")[0].rstrip("/").startswith("/api/regions/"):
             t = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[1]
             if not valid_tile(t):

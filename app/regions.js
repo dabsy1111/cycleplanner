@@ -70,15 +70,53 @@ async function offerRegions(points, why) {
   $('dl-region').onclick = () => downloadTiles(tiles, () => requestRoute(false));
 }
 
+// Tell the server which regions you're routing in, once per region per session.
+const reportedTiles = new Set();
+routeHooks.push((rt) => {
+  if (!rt) return;
+  const tiles = tilesFor([rt.coords[0], rt.coords[rt.coords.length - 1], rt.coords[rt.coords.length >> 1]]).filter((t) => !reportedTiles.has(t));
+  if (!tiles.length) return;
+  tiles.forEach((t) => reportedTiles.add(t));
+  fetch('/api/regions/used', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tiles) }).catch(() => {});
+});
+
+const homeTile = () => (typeof home !== 'undefined' && home ? tileFor(home.lng, home.lat) : 'E115_S35');
+const daysSince = (d) => (d ? Math.floor((Date.now() - new Date(d + 'T00:00:00')) / 86400000) : null);
+const usedText = (d) => { const n = daysSince(d); return n == null ? 'never used' : n <= 0 ? 'used today' : n === 1 ? 'used yesterday' : `last used ${n} days ago`; };
+
+function staleRegions(st) {
+  const age = +$('region-age').value;
+  return st.tiles.filter((t) => t.tile !== homeTile() && (age === 0 || (daysSince(t.lastUsed) ?? 9999) >= age));
+}
+
+$('region-clear').onclick = async () => {
+  const st = await regionState();
+  const gone = staleRegions(st);
+  const btn = $('region-clear');
+  if (!gone.length) { $('region-note').textContent = 'Nothing to clear.'; return; }
+  if (!btn.dataset.armed) { // second tap confirms
+    btn.dataset.armed = '1';
+    btn.textContent = `Delete ${gone.length} (${Math.round(gone.reduce((a, t) => a + t.mb, 0))} MB)?`;
+    $('region-note').textContent = 'Will delete: ' + gone.map((t) => t.tile).join(', ') + '. Tap again to confirm.';
+    setTimeout(() => { delete btn.dataset.armed; btn.textContent = 'Clear'; }, 6000);
+    return;
+  }
+  delete btn.dataset.armed; btn.textContent = 'Clear';
+  for (const t of gone) await fetch(`/api/regions/${t.tile}`, { method: 'DELETE' });
+  $('region-note').textContent = `Deleted ${gone.map((t) => t.tile).join(', ')}.`;
+  renderRegions(await regionState());
+};
+
 function renderRegions(st) {
   const ul = $('regions');
   if (!ul) return;
   ul.innerHTML = '';
   for (const t of st.tiles) {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="km">${escapeHtml(t.tile)}</span><span>${t.mb} MB · updated ${escapeHtml(t.updated)}</span>` +
-      '<button class="x" title="Delete this region">✕</button>';
-    li.querySelector('button').onclick = async (e) => {
+    const isHome = t.tile === homeTile();
+    li.innerHTML = `<span class="km">${escapeHtml(t.tile)}</span><span>${isHome ? '<b>home</b> · ' : ''}${t.mb} MB · ${usedText(t.lastUsed)}</span>` +
+      (isHome ? '' : '<button class="x" title="Delete this region">✕</button>');
+    if (!isHome) li.querySelector('button').onclick = async (e) => {
       e.stopPropagation();
       if (!confirmInline(li, `Delete ${t.tile}? Routes there will stop working until it's downloaded again.`)) return;
       await fetch(`/api/regions/${t.tile}`, { method: 'DELETE' });

@@ -49,6 +49,8 @@ function buildReport() {
     markedRoads: (opt('markedRoads', []) || []).map((r) => ({ kind: r.kind, name: r.name, line: r.line })),
     loop: null,
     loopStatus: $('loop-status')?.textContent || null,
+    loopTimings: typeof loopTimings !== 'undefined' ? loopTimings : null,
+    forecastMs: typeof windMs !== 'undefined' ? windMs : null,
     route: null,
   };
   const ll = opt('lastLoop');

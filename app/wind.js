@@ -1,7 +1,7 @@
 'use strict';
 /* Wind: Open-Meteo hourly forecast, headwind along the route, and which way to ride a loop. */
 
-const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast';
+const OPEN_METEO = '/wx/forecast'; // Open-Meteo, via your server's cache
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 const compass = (deg) => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
 
@@ -18,6 +18,7 @@ function defaultDeparture() {
 $('wind-time').value = defaultDeparture();
 function departureMs() { const t = Date.parse($('wind-time').value); return Number.isFinite(t) ? t : Date.now(); }
 
+let windMs = null; // how long the last forecast took, for problem reports
 async function loadWind(lng, lat) {
   const key = `${lat.toFixed(1)},${lng.toFixed(1)}`;
   if (wind && wind.key === key && Date.now() - wind.fetched < 30 * 60e3) return wind;
@@ -27,7 +28,10 @@ async function loadWind(lng, lat) {
     hourly: 'wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,apparent_temperature,precipitation_probability,uv_index,is_day',
     wind_speed_unit: 'kmh', timezone: 'auto', past_days: '1', forecast_days: '7',
   });
-  const p = fetch(`${OPEN_METEO}?${params}`).then((r) => {
+  // Give up after 20 s (one retry): a hung forecast mustn't hold anything else up.
+  const t0 = performance.now();
+  const p = fetch(`${OPEN_METEO}?${params}`, { signal: AbortSignal.timeout(30000) }).then((r) => {
+    windMs = Math.round(performance.now() - t0);
     if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
     return r.json();
   }).then((j) => {

@@ -357,15 +357,23 @@ function progShow(on) {
   box.hidden = !on;
   $('loop-go').textContent = on ? 'Making loops…' : 'Make loops';
   clearInterval(loopProg.timer);
+  if (!on && loopProg.step) { progStep(''); loopTimings.push(['total', Math.round((Date.now() - loopProg.t0) / 1000)]); }
   if (on) {
-    Object.assign(loopProg, { t0: Date.now(), step: 'Starting…', done: 0, total: 0, found: 0 });
+    Object.assign(loopProg, { t0: Date.now(), step: 'Starting…', stepT: Date.now(), done: 0, total: 0, found: 0 });
+    loopTimings = [];
     loopProg.active.clear();
     loopProg.timer = setInterval(progRender, 500);
     progRender();
     box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
-function progStep(text) { loopProg.step = text; progRender(); }
+function progStep(text) {
+  const now = Date.now();
+  if (loopProg.step && loopProg.stepT) loopTimings.push([loopProg.step, Math.round((now - loopProg.stepT) / 1000)]);
+  loopProg.step = text; loopProg.stepT = now;
+  progRender();
+}
+let loopTimings = []; // [step, seconds], sent with problem reports
 function progRender() {
   const p = loopProg, secs = Math.round((Date.now() - p.t0) / 1000);
   const dirs = [...p.active].map((b) => (typeof b === 'number' ? compass(b) : '')).filter(Boolean);
@@ -397,8 +405,10 @@ async function generateLoops() {
       const miss = await missingTiles([start]);
       if (miss.length) { progShow(false); offerRegions([start]); st.textContent = 'This area needs downloading first (see the message at the top).'; return; }
     } catch { /* can't tell: try anyway */ }
-    progStep('Getting the wind forecast for your ride…');
-    try { await loadWind(start[0], start[1]); } catch { /* wind is optional */ }
+    // The forecast loads in the background; loops are turned to suit the wind once it arrives.
+    const windReady = loadWind(start[0], start[1]).catch(() => null);
+    const windKey = `${start[1].toFixed(1)},${start[0].toFixed(1)}`;
+    const windHere = () => wind && wind.key === windKey; // not a forecast left over from somewhere else
     if (lp('lp-snap')) {
       st.textContent = '';
       progStep('Looking up bike paths to snap to…');
@@ -420,7 +430,7 @@ async function generateLoops() {
     const found = [];
     let done = 0;
     loopProg.total = bearings.length;
-    progRender();
+    progStep('Routing loops');
     const queue = [...bearings];
     const worker = async () => {
       while (queue.length) {
@@ -428,17 +438,7 @@ async function generateLoops() {
         loopProg.active.add(brg); progRender();
         try {
           const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
-          // Ride it whichever way puts the wind behind you on the way home.
-          if (wind) {
-            const fwd = windStats(l.rt), rev = windStats(l.rt, true);
-            if (rev.second < fwd.second - 1) {
-              l.pts = [...l.pts].reverse();
-              l.rt = await fetchRoute(l.pts, profile);
-              if (l.through) l.bIndex = l.pts.length - 1 - l.bIndex;
-              l.err = Math.abs(l.rt.length - tgt) / tgt;
-              l.wind = windStats(l.rt);
-            } else l.wind = fwd;
-          }
+          if (windHere()) await windTurn(l);
           if (l.err < 0.4 && l.rt.length > 1000) found.push(l);
         } catch { /* usually a circle point out at sea */ }
         done++;
@@ -447,7 +447,30 @@ async function generateLoops() {
         progRender();
       }
     };
+    // Ride each loop whichever way puts the wind behind you on the way home.
+    async function windTurn(l) {
+      const fwd = windStats(l.rt), rev = windStats(l.rt, true);
+      if (rev.second < fwd.second - 1) {
+        l.pts = [...l.pts].reverse();
+        l.rt = await fetchRoute(l.pts, profile);
+        if (l.through) l.bIndex = l.pts.length - 1 - l.bIndex;
+        l.err = Math.abs(l.rt.length - tgt) / tgt;
+        l.wind = windStats(l.rt);
+      } else l.wind = fwd;
+    }
     await Promise.all([worker(), worker(), worker()]);
+    // Loops routed before the forecast arrived: give it a few more seconds, then turn them.
+    const late = found.filter((l) => !l.wind);
+    if (late.length) {
+      if (!windHere()) {
+        progStep('Waiting a moment for the wind forecast…');
+        await Promise.race([windReady, new Promise((r) => setTimeout(r, 5000))]);
+      }
+      if (windHere()) {
+        progStep('Turning loops to put the wind behind you on the way home…');
+        await Promise.all(late.map((l) => windTurn(l).catch(() => {})));
+      } else note = (note ? note + ' ' : '') + "The wind forecast didn't load, so loops aren't turned for the wind.";
+    }
 
     progStep(`Ranking ${found.length} loops…`);
     for (const l of found) {

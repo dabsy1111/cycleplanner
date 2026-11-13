@@ -361,6 +361,10 @@ async function generateLoops() {
   renderLoops();
   showLoopPreview();
   try {
+    try {
+      const miss = await missingTiles([start]);
+      if (miss.length) { offerRegions([start]); st.textContent = 'This area needs downloading first (see the message at the top).'; return; }
+    } catch { /* can't tell: try anyway */ }
     try { await loadWind(start[0], start[1]); } catch { /* wind is optional */ }
     if (lp('lp-snap')) {
       st.textContent = 'Looking up bike paths…';

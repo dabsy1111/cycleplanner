@@ -257,6 +257,14 @@
         <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
         <ul id="nogos" class="stops"></ul>
       </details>
+
+      <details class="sec" data-key="regions">
+        <summary>Regions (routing data)</summary>
+        <p class="hint">Routing needs map data for the area, in 5° × 5° squares (about 500 km across). Perth is E115_S35. If you plan a route somewhere new you'll be offered the download; or pan the map there and press the button. Downloaded regions are kept up to date weekly.</p>
+        <div class="row buttons"><button id="region-here">Download the area in the middle of the map</button></div>
+        <div id="region-note" class="small"></div>
+        <ul id="regions" class="stops"></ul>
+      </details>
     </details>
 
   </div>
@@ -273,6 +281,7 @@
 <script src="climbs.js"></script>
 <script src="safety.js"></script>
 <script src="alternatives.js"></script>
+<script src="regions.js"></script>
 <script src="pace.js"></script>
 <script src="roads.js"></script>
 <script src="gpximport.js"></script>

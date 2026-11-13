@@ -593,6 +593,61 @@ def bikepaths_in(bbox):
     return {"covered": covered, "updated": oldest, "cells": out}
 
 
+# ---------- routing data for other regions ----------
+# BRouter's data comes in 5x5 degree tiles. The router container downloads the ones in TILES at
+# start; these endpoints let the app fetch more on demand into the same shared data folder,
+# where BRouter picks them up without a restart.
+import re
+SEG_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "segments")
+SEGMENTS_URL = os.environ.get("SEGMENTS_URL", "https://brouter.de/brouter/segments4")
+TILE_RE = re.compile(r"^[EW](\d{1,3})_[NS](\d{1,2})$")
+seg_jobs = {}  # tile -> {"done": bytes, "total": bytes, "error": str|None}
+
+
+def valid_tile(t):
+    m = TILE_RE.match(t or "")
+    return bool(m) and int(m.group(1)) % 5 == 0 and int(m.group(2)) % 5 == 0 and int(m.group(1)) <= 180 and int(m.group(2)) <= 90
+
+
+def regions_list():
+    out = []
+    try:
+        names = sorted(os.listdir(SEG_DIR))
+    except OSError:
+        names = []
+    for n in names:
+        if n.endswith(".rd5"):
+            st = os.stat(os.path.join(SEG_DIR, n))
+            out.append({"tile": n[:-4], "mb": round(st.st_size / 1e6, 1),
+                        "updated": time.strftime("%Y-%m-%d", time.localtime(st.st_mtime))})
+    return {"tiles": out, "downloading": seg_jobs}
+
+
+def download_tile(t):
+    job = seg_jobs[t]
+    part = os.path.join(SEG_DIR, t + ".rd5.part")
+    try:
+        os.makedirs(SEG_DIR, exist_ok=True)
+        req = urllib.request.Request(f"{SEGMENTS_URL}/{t}.rd5", headers={"User-Agent": "cycleplanner/1.0"})
+        with urllib.request.urlopen(req, timeout=120) as r, open(part, "wb") as f:
+            job["total"] = int(r.headers.get("Content-Length") or 0)
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                job["done"] += len(chunk)
+        os.replace(part, os.path.join(SEG_DIR, t + ".rd5"))
+        seg_jobs.pop(t, None)
+        print(f"regions: downloaded {t}.rd5 ({job['done'] // 1_000_000} MB)", flush=True)
+    except Exception as e:
+        job["error"] = "no map data for that area" if getattr(e, "code", None) == 404 else str(e)[:200]
+        try:
+            os.remove(part)
+        except OSError:
+            pass
+
+
 def scheduler():
     if not API_KEY:
         return
@@ -640,6 +695,8 @@ class Handler(BaseHTTPRequestHandler):
                 status["last_sync"] = load_state().get("last_sync")
             body = {"configured": bool(API_KEY), "rides": ride_count(), **status}
             self.send(200, json.dumps(body).encode())
+        elif path == "/api/regions":
+            self.send(200, json.dumps(regions_list()).encode())
         elif path == "/api/bikepaths":
             qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
             try:
@@ -663,6 +720,16 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/routes/"):
             route_delete(path.rsplit("/", 1)[1])
             self.send(204, b"")
+        elif path.startswith("/api/regions/"):
+            t = path.rsplit("/", 1)[1]
+            if not valid_tile(t):
+                self.send(400, b'{"error":"bad tile name"}')
+                return
+            try:
+                os.remove(os.path.join(SEG_DIR, t + ".rd5"))
+            except OSError:
+                pass
+            self.send(204, b"")
         else:
             self.send(404, b'{"error":"not found"}')
 
@@ -679,6 +746,19 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path.split("?")[0].rstrip("/").startswith("/api/regions/"):
+            t = self.path.split("?")[0].rstrip("/").rsplit("/", 1)[1]
+            if not valid_tile(t):
+                self.send(400, b'{"error":"bad tile name"}')
+                return
+            if os.path.exists(os.path.join(SEG_DIR, t + ".rd5")):
+                self.send(200, b'{"status":"have it"}')
+                return
+            if t not in seg_jobs or seg_jobs[t].get("error"):
+                seg_jobs[t] = {"done": 0, "total": 0, "error": None}
+                threading.Thread(target=download_tile, args=(t,), daemon=True).start()
+            self.send(202, b'{"status":"downloading"}')
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/overpass":
             n = int(self.headers.get("Content-Length") or 0)
             form = urllib.parse.parse_qs(self.rfile.read(min(n, 100_000)).decode())

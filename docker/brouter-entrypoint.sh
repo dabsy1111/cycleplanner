@@ -38,7 +38,10 @@ done
 
 stale_tiles() {
   [ "$REFRESH_DAYS" -gt 0 ] || return 0
-  for t in $TILES; do
+  # Every tile in the folder, including ones the app downloaded for other regions.
+  for f in "$SEG"/*.rd5; do
+    [ -e "$f" ] || continue
+    t="$(basename "$f" .rd5)"
     if [ -n "$(find "$SEG/$t.rd5" -mtime +"$((REFRESH_DAYS - 1))" 2>/dev/null)" ]; then echo "$t"; fi
   done
 }

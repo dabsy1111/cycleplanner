@@ -159,7 +159,7 @@ map.on('load', () => {
   map.addSource('aerial', {
     // Landgate's free WA aerial mosaic: about 7.5–15 cm per pixel over Perth, at least ~a year old.
     // It isn't pre-tiled, so each tile is drawn on request (512 px for sharp phone screens) and cached by the server.
-    type: 'raster', tileSize: 256, minzoom: 10, maxzoom: 21,
+    type: 'raster', tileSize: 256, minzoom: 10, maxzoom: 21, bounds: [112.9, -35.2, 129.0, -13.6], // WA only
     tiles: [`${LANDGATE}?bbox={bbox-epsg-3857}&bboxSR=3857&imageSR=3857&size=512,512&format=jpg&f=image`],
     attribution: 'Aerial imagery © <a href="https://www.landgate.wa.gov.au">Landgate</a> / SLIP',
   });
@@ -411,6 +411,7 @@ async function requestRoute(fit) {
     if (fit) fitRoute();
   } catch (err) {
     if (err.name === 'AbortError') return;
+    if (/datafile \S+\.rd5 not found/.test(err.message)) { offerRegions(waypoints.map((w) => [w.lng, w.lat]), err.message); return; }
     showMsg('Routing failed: ' + err.message);
   }
 }
@@ -825,7 +826,7 @@ const doSearch = debounce(async (q) => {
   if (q.length < 3) { ul.hidden = true; return; }
   const c = map.getCenter();
   const params = new URLSearchParams({
-    q, format: 'jsonv2', limit: '6', countrycodes: 'au',
+    q, format: 'jsonv2', limit: '6', // results near the map first, but anywhere in the world
     viewbox: `${c.lng - 0.6},${c.lat + 0.6},${c.lng + 0.6},${c.lat - 0.6}`,
   });
   try {
@@ -930,7 +931,8 @@ $('colour-by').onchange = () => { store.set('cp.colour', $('colour-by').value); 
 function applyBase() {
   const b = $('lyr-base').value;
   map.setLayoutProperty('aerial', 'visibility', b === 'aerial' ? 'visible' : 'none');
-  map.setLayoutProperty('satellite', 'visibility', b === 'satellite' ? 'visible' : 'none');
+  // Landgate only covers WA, so the Esri satellite sits underneath it to fill in everywhere else.
+  map.setLayoutProperty('satellite', 'visibility', b !== 'map' ? 'visible' : 'none');
   map.setLayoutProperty('photo-paths', 'visibility', b !== 'map' && $('lyr-photo-paths').checked ? 'visible' : 'none');
   $('photo-paths-row').hidden = b === 'map';
   // The base map's 3D buildings would sit on top of the photo.

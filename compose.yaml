@@ -3,7 +3,7 @@ services:
     image: ghcr.io/dabsy1111/cycleplanner-brouter:latest
     restart: unless-stopped
     environment:
-      TILES: E115_S35        # add E115_S40 for Albany / south coast
+      TILES: E115_S35        # always kept; the app can download other regions on demand (More > Regions)
       REFRESH_DAYS: 7        # re-download OpenStreetMap routing data weekly
       JAVA_MAX_HEAP: 1g
     volumes:

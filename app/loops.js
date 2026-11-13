@@ -350,6 +350,32 @@ function renderLoops() {
   });
 }
 
+// ---------- progress while it works ----------
+const loopProg = { t0: 0, timer: null, step: '', done: 0, total: 0, found: 0, active: new Set() };
+function progShow(on) {
+  const box = $('loop-progress');
+  box.hidden = !on;
+  $('loop-go').textContent = on ? 'Making loops…' : 'Make loops';
+  clearInterval(loopProg.timer);
+  if (on) {
+    Object.assign(loopProg, { t0: Date.now(), step: 'Starting…', done: 0, total: 0, found: 0 });
+    loopProg.active.clear();
+    loopProg.timer = setInterval(progRender, 500);
+    progRender();
+    box.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+function progStep(text) { loopProg.step = text; progRender(); }
+function progRender() {
+  const p = loopProg, secs = Math.round((Date.now() - p.t0) / 1000);
+  const dirs = [...p.active].map((b) => (typeof b === 'number' ? compass(b) : '')).filter(Boolean);
+  const step = p.total && p.done < p.total && dirs.length ? `Routing loops heading ${dirs.join(', ')}…` : p.step;
+  $('loop-progress').innerHTML = `<div class="lp-step"><span class="spinner"></span>${escapeHtml(step)}</div>` +
+    (p.total ? `<div class="dl-bar"><div style="width:${((100 * p.done) / p.total).toFixed(0)}%"></div></div>` +
+      `<div class="small">${p.done} of ${p.total} directions tried · ${p.found} loop${p.found === 1 ? '' : 's'} so far · ${secs} s</div>` :
+      `<div class="small">${secs} s</div>`);
+}
+
 async function generateLoops() {
   if (loopBusy) return;
   loopBusy = true;
@@ -360,6 +386,8 @@ async function generateLoops() {
   const profile = $('profile').value;
   const st = $('loop-status');
   $('loop-go').disabled = true;
+  progShow(true);
+  progStep('Checking map data for this area…');
   loopResults = [];
   loopPicked = -1;
   renderLoops();
@@ -367,11 +395,13 @@ async function generateLoops() {
   try {
     try {
       const miss = await missingTiles([start]);
-      if (miss.length) { offerRegions([start]); st.textContent = 'This area needs downloading first (see the message at the top).'; return; }
+      if (miss.length) { progShow(false); offerRegions([start]); st.textContent = 'This area needs downloading first (see the message at the top).'; return; }
     } catch { /* can't tell: try anyway */ }
+    progStep('Getting the wind forecast for your ride…');
     try { await loadWind(start[0], start[1]); } catch { /* wind is optional */ }
     if (lp('lp-snap')) {
-      st.textContent = 'Looking up bike paths…';
+      st.textContent = '';
+      progStep('Looking up bike paths to snap to…');
       try { await loadPathIndex(start, target / (2 * Math.PI)); } catch { pathIndex = { key: '', cells: new Map() }; }
       if (lp('lp-liked')) addLikedToPathIndex();
     }
@@ -389,11 +419,13 @@ async function generateLoops() {
     const bearings = B ? THROUGH_DIRS : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
     const found = [];
     let done = 0;
-    st.textContent = `Working… 0 of ${bearings.length}`;
+    loopProg.total = bearings.length;
+    progRender();
     const queue = [...bearings];
     const worker = async () => {
       while (queue.length) {
         const brg = queue.shift();
+        loopProg.active.add(brg); progRender();
         try {
           const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
           // Ride it whichever way puts the wind behind you on the way home.
@@ -410,11 +442,14 @@ async function generateLoops() {
           if (l.err < 0.4 && l.rt.length > 1000) found.push(l);
         } catch { /* usually a circle point out at sea */ }
         done++;
-        st.textContent = `Working… ${done} of ${bearings.length}`;
+        loopProg.active.delete(brg);
+        loopProg.done = done; loopProg.found = found.length;
+        progRender();
       }
     };
     await Promise.all([worker(), worker(), worker()]);
 
+    progStep(`Ranking ${found.length} loops…`);
     for (const l of found) {
       l.mainPct = mainRoadPct(l.rt);
       l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
@@ -425,7 +460,7 @@ async function generateLoops() {
     let list = close.length >= 3 ? close : found;
     if (list.length && close.length < 3 && found.length > close.length) note = (note ? note + ' ' : '') + 'Few loops fit that distance here, so some are further off it.';
     if (lp('lp-interval') && found.length) {
-      st.textContent = 'Checking lights and crossings for interval stretches…';
+      progStep('Checking lights and crossings for interval stretches…');
       const mins = +$('lp-interval-min').value || 8;
       try {
         // One lookup covering every loop.
@@ -458,6 +493,7 @@ async function generateLoops() {
   } finally {
     loopBusy = false;
     $('loop-go').disabled = false;
+    progShow(false);
   }
 }
 

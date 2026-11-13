@@ -48,6 +48,7 @@ function buildReport() {
     nogoAreas: opt('nogoAreas', []),
     markedRoads: (opt('markedRoads', []) || []).map((r) => ({ kind: r.kind, name: r.name, line: r.line })),
     loop: null,
+    loopStatus: $('loop-status')?.textContent || null,
     route: null,
   };
   const ll = opt('lastLoop');

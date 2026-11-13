@@ -147,7 +147,11 @@ const uturnMetres = (rt) => uturns(rt).reduce((a, u) => a + u.len, 0);
 // ... and move the point back to where its spike leaves the through road, then reroute.
 async function trimSpikes(pts, rt, profile, fixed = []) {
   for (let round = 0; round < 2; round++) {
-    const sp = spikes(rt, pts).filter((s) => s.len > 40 && !fixed.includes(s.n));
+    // A "spike" as long as the way out to the point is really a dead-end road (a valley, a
+    // headland): trimming it would pull the point back to the start and collapse the loop.
+    const home = pts[0];
+    const sp = spikes(rt, pts).filter((s) => s.len > 40 && !fixed.includes(s.n) &&
+      s.len < 0.5 * haversine(home, pts[s.n]) && haversine(home, pointAt(rt, s.at - s.len)) > 300);
     if (!sp.length) break;
     pts = pts.slice();
     for (const s of sp) pts[s.n] = pointAt(rt, s.at - s.len);
@@ -403,7 +407,7 @@ async function generateLoops() {
               l.wind = windStats(l.rt);
             } else l.wind = fwd;
           }
-          if (l.err < 0.25) found.push(l);
+          if (l.err < 0.4 && l.rt.length > 1000) found.push(l);
         } catch { /* usually a circle point out at sea */ }
         done++;
         st.textContent = `Working… ${done} of ${bearings.length}`;
@@ -416,7 +420,10 @@ async function generateLoops() {
       l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
       l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
     }
-    let list = found;
+    // Prefer loops within 25% of the distance; only fall back to looser ones if that leaves too few.
+    const close = found.filter((l) => l.err < 0.25);
+    let list = close.length >= 3 ? close : found;
+    if (list.length && close.length < 3 && found.length > close.length) note = (note ? note + ' ' : '') + 'Few loops fit that distance here, so some are further off it.';
     if (lp('lp-interval') && found.length) {
       st.textContent = 'Checking lights and crossings for interval stretches…';
       const mins = +$('lp-interval-min').value || 8;
@@ -446,7 +453,7 @@ async function generateLoops() {
       map.fitBounds(b, { padding: 50 });
       st.textContent = (note ? note + ' ' : '') + `${loopResults.length} loops, best match first. Hover to highlight one, tap to use it.`;
     } else {
-      st.textContent = note || 'No loops found. Try a different distance or start point.';
+      st.textContent = note || 'No loops found. The roads around here may be mostly dead ends (hills, coast or water). Try a longer distance, or put down a second point to loop through.';
     }
   } finally {
     loopBusy = false;

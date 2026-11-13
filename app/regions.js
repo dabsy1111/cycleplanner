@@ -48,13 +48,16 @@ async function downloadTiles(tiles, after) {
     }
     if (jobs.length) {
       const done = jobs.reduce((a, j) => a + j.done, 0), total = jobs.reduce((a, j) => a + j.total, 0);
-      showMsg(`Downloading map data for routing: ${Math.round(done / 1e6)}${total ? ` of ${Math.round(total / 1e6)}` : ''} MB…`);
+      const m = $('msg');
+      m.hidden = false;
+      m.innerHTML = `Downloading map data for ${tiles.join(', ')}: ${Math.round(done / 1e6)}${total ? ` of ${Math.round(total / 1e6)} MB (${Math.round((100 * done) / total)}%)` : ' MB'}` +
+        `<div class="dl-bar"><div style="width:${total ? Math.min(100, (100 * done) / total).toFixed(1) : 5}%"></div></div>`;
       return;
     }
     clearInterval(regionPoll);
     showMsg('');
     if (after) after();
-  }, 1500);
+  }, 1000);
 }
 
 // Shown when a route fails because the data isn't there.
@@ -131,7 +134,9 @@ function renderRegions(st) {
   }
   for (const [t, j] of Object.entries(st.downloading)) {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="km">${escapeHtml(t)}</span><span>${j.error ? 'failed: ' + escapeHtml(j.error) : `downloading ${Math.round(j.done / 1e6)}${j.total ? ' of ' + Math.round(j.total / 1e6) : ''} MB`}</span>`;
+    const pct = j.total ? Math.min(100, (100 * j.done) / j.total) : 5;
+    li.innerHTML = `<span class="km">${escapeHtml(t)}</span><span style="flex:1">${j.error ? 'failed: ' + escapeHtml(j.error) : `downloading ${Math.round(j.done / 1e6)}${j.total ? ' of ' + Math.round(j.total / 1e6) : ''} MB` +
+      `<div class="dl-bar"><div style="width:${pct.toFixed(1)}%"></div></div>`}</span>`;
     ul.appendChild(li);
   }
 }

@@ -667,6 +667,7 @@ def download_tile(t):
                 f.write(chunk)
                 job["done"] += len(chunk)
         os.replace(part, os.path.join(SEG_DIR, t + ".rd5"))
+        mark_used([t])  # a fresh download counts as used
         seg_jobs.pop(t, None)
         print(f"regions: downloaded {t}.rd5 ({job['done'] // 1_000_000} MB)", flush=True)
     except Exception as e:

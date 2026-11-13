@@ -177,6 +177,25 @@
           </select></label>
         <label class="check" id="photo-paths-row" hidden><input id="lyr-photo-paths" type="checkbox" checked> Outline mapped paths on the photo <small>(blue = bike path, yellow = other path)</small></label>
         <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
+        <label class="check"><input id="heat-show" type="checkbox"> Popularity heatmap</label>
+        <div id="heat-opts" hidden>
+          <div class="row small">
+            <select id="heat-activity" aria-label="Heatmap activity">
+              <option value="ride">Rides</option>
+              <option value="all">All activities</option>
+              <option value="run">Runs</option>
+            </select>
+            <select id="heat-color" aria-label="Heatmap colours">
+              <option value="hot">Hot</option>
+              <option value="blue">Blue</option>
+              <option value="purple">Purple</option>
+              <option value="gray">Grey</option>
+              <option value="bluered">Blue-red</option>
+            </select>
+          </div>
+          <div class="row small">Opacity <input id="heat-opacity" type="range" min="10" max="100" step="5" value="60" class="slider"> <span id="heat-opacity-val">60%</span></div>
+          <p class="hint" id="heat-status"></p>
+        </div>
         <label class="check"><input id="md-bus" type="checkbox"> Bus stops</label>
         <label class="check"><input id="md-rail" type="checkbox" checked> Train stations</label>
         <label class="check"><input id="md-places" type="checkbox" checked> Shops, cafés &amp; other places</label>
@@ -280,6 +299,7 @@
 <script src="efforts.js"></script>
 <script src="loops.js"></script>
 <script src="history.js"></script>
+<script src="heatmap.js"></script>
 <script src="routes.js"></script>
 <script src="nogo.js"></script>
 <script src="climbs.js"></script>

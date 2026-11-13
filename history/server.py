@@ -9,6 +9,7 @@ Env:
   HISTORY_SINCE    first date to sync, default 2015-01-01
   SYNC_HOURS       automatic sync interval, default 6 (0 = only when asked)
   DATA_DIR         default /data
+  HEATMAP_URL      popularity heatmap tile template (see heattiles.py). Empty = off.
 """
 import base64
 import datetime as dt
@@ -21,6 +22,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import heattiles
 
 API_KEY = os.environ.get("ICU_API_KEY", "").strip()
 ATHLETE = os.environ.get("ICU_ATHLETE_ID", "0").strip() or "0"
@@ -742,8 +745,51 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(r, separators=(",", ":")).encode())
         elif path == "/api/history/tracks":
             self.send(200, tracks_body())
+        elif path == "/api/heat/status":
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            act, col = (qs.get("activity") or [""])[0], (qs.get("color") or [""])[0]
+            st = heattiles.status(act or None, col or None)
+            never_tried = st["last_ok"] is None and st["last_error"] is None
+            retry_due = st["last_error"] is not None and time.time() >= heattiles.state["down_until"]
+            if st["configured"] and (never_tried or retry_due):
+                heattiles.probe()  # check the proxy now rather than report an old answer
+                st = heattiles.status(act or None, col or None)
+            self.send(200, json.dumps(st).encode())
+        elif path.startswith("/api/heat/tile/"):
+            self.heat_tile(path)
         else:
             self.send(404, b'{"error":"not found"}')
+
+    def heat_tile(self, path):
+        # /api/heat/tile/<activity>/<color>/<z>/<x>/<y>.png
+        m = re.match(r"^/api/heat/tile/([^/]+)/([^/]+)/(\d+)/(-?\d+)/(\d+)\.png$", path)
+        if not m:
+            self.send(400, b'{"error":"expected /api/heat/tile/<activity>/<color>/<z>/<x>/<y>.png"}')
+            return
+        activity, color = m.group(1), m.group(2)
+        z, x, y = int(m.group(3)), int(m.group(4)), int(m.group(5))
+        if 0 <= z <= heattiles.MAX_Z:
+            x %= 1 << z  # wrap across the antimeridian
+        if not heattiles.valid(activity, color, z, x, y):
+            self.send(400, b'{"error":"bad tile"}')
+            return
+        if not heattiles.configured():
+            self.send(503, b'{"error":"HEATMAP_URL is not set"}')
+            return
+        body, cache = heattiles.get_tile(activity, color, z, x, y)
+        if body is None:
+            err = heattiles.layer_error(activity, color) or heattiles.state["last_error"] or "heatmap proxy unavailable"
+            self.send(502, json.dumps({"error": err}).encode())
+            return
+        body = body or heattiles.BLANK_PNG
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        # The browser can keep a tile for a day; the server's own copy lasts HEATMAP_DAYS.
+        self.send_header("Cache-Control", "public, max-age=86400" if cache != "stale" else "no-cache")
+        self.send_header("X-Cache", cache)
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_DELETE(self):
         path = self.path.split("?")[0].rstrip("/")

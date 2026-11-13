@@ -23,8 +23,20 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `ICU_API_KEY` (history) | empty | Your intervals.icu API key, from intervals.icu → Settings → Developer Settings. Turns on ride history. |
 | `SYNC_HOURS` (history) | `6` | How often to pull new rides from intervals.icu. `0` = only when you press Sync. |
 | `HISTORY_SINCE` (history) | `2015-01-01` | Oldest rides to fetch. |
+| `HEATMAP_URL` (history) | empty | Tile URL of your popularity heatmap proxy, with `{activity}` `{color}` `{z}` `{x}` `{y}`. See below. |
+| `HEATMAP_DAYS` (history) | `30` | Ask the heatmap proxy again for tiles older than this. |
 
 The web port is `8095`; change the left side of `8095:80` if that clashes with something.
+
+## Popularity heatmap
+
+**More › Map › Popularity heatmap** draws heatmap tiles from a proxy you run, with a choice of activity, colours and opacity. It sits over the map and photos but under street names, your ride history and the route.
+
+The browser never talks to the proxy. The history service fetches tiles (at most 4 at a time), keeps them in `data/heat/tiles` for `HEATMAP_DAYS`, and nginx serves them from the app's own address at `/tiles/heat/...`. So there's no CORS to set up, the proxy only has to be reachable from the server, and tiles you've looked at keep showing if the proxy goes down.
+
+The compose file points at `http://host.docker.internal:8080/...`, which is the server itself. The proxy has to listen on `0.0.0.0` (or the Docker bridge), not `127.0.0.1`, or containers can't reach it. If it runs on another machine, put that machine's address in `HEATMAP_URL` instead.
+
+The routing doesn't use the heatmap yet; this is display only.
 
 ## Ride history
 

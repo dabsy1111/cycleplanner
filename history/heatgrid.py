@@ -144,15 +144,30 @@ def _load_grid(x, y):
     return struct.unpack(">H", d[:2])[0], zlib.decompress(d[2:])
 
 
+def _cached_color(x, y):
+    """A colour scheme this tile is already cached in (any will do: the alpha is the same in all),
+    so tiles you've looked at on the map, in whatever colours, aren't downloaded again."""
+    try:
+        colors = os.listdir(os.path.join(heattiles.CACHE, ACTIVITY))
+    except OSError:
+        return COLOR
+    for c in [COLOR] + sorted(c for c in colors if c != COLOR):
+        body, age = heattiles._read_cached(heattiles.tile_path(ACTIVITY, c, Z, x, y))
+        if body is not None and age < heattiles.TTL:
+            return c
+    return COLOR
+
+
 def ensure_tile(x, y, allow_fetch=True):
     """Make sure grid tile (x, y) is up to date with the cached PNG.
     Returns 'heat' | 'empty' | 'missing'. 'missing' means we don't know (not downloaded)."""
-    tile, cache = heattiles.get_tile(ACTIVITY, COLOR, Z, x, y, allow_fetch=allow_fetch)
+    color = _cached_color(x, y)
+    tile, cache = heattiles.get_tile(ACTIVITY, color, Z, x, y, allow_fetch=allow_fetch)
     if tile is None:
         return "missing"
     if tile == b"":
         return "empty"
-    png = heattiles.tile_path(ACTIVITY, COLOR, Z, x, y)
+    png = heattiles.tile_path(ACTIVITY, color, Z, x, y)
     gp = grid_path(x, y)
     try:
         if os.stat(gp).st_mtime >= os.stat(png).st_mtime:

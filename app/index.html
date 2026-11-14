@@ -101,10 +101,13 @@
       <summary>Loop generator</summary>
       <div class="row small">
         About <input id="loop-km" type="number" min="5" max="300" step="5" value="50"> km
-        <span id="loop-time"></span>
+        or <input id="loop-hrs" type="text" inputmode="decimal" placeholder="2:00" size="5" title="Ride time, e.g. 2:30 or 1.5"> h
       </div>
+      <div id="loop-time" class="small hint"></div>
       <label class="opt"><input id="lp-through" type="checkbox" checked>
         <span><b>Loop through my second point</b><small>If you've put down a second point, every loop goes from the start out to that point and back home a different way. The distance is raised if the point is too far for it.</small></span></label>
+      <label class="opt sub"><input id="lp-oneway" type="checkbox">
+        <span><b>Finish there (A to B)</b><small>Instead of coming home, end at your second point, taking a longer way to fill the distance or time you set.</small></span></label>
       <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, footpath, traffic and route options above, and is ridden whichever way gives a tailwind home.</p>
       <div class="loopopts">
         <label class="opt"><input id="lp-noback" type="checkbox" checked>

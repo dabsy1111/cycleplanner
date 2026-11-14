@@ -211,3 +211,7 @@ textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-
 @keyframes spin { to { transform: rotate(360deg); } }
 div.opt > span { padding-left: 21px; }
 .opt small.heat-progress { color: var(--fg); margin-top: 4px; }
+
+#loop-km.est, #loop-hrs.est { color: var(--muted); background: #f8f9fa; }
+#loop-hrs { width: 4.5em; }
+.opt.sub { margin-left: 22px; }

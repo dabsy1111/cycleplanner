@@ -195,22 +195,42 @@ function throughPoints(A, B, dir, d) {
   out.push(A);
   return { pts: out, bIndex };
 }
+// A to B instead of a loop: just the first half, from the start round to your point.
+let loopOneWay = false;
+function throughShape(A, B, dir, d) {
+  const r = throughPoints(A, B, dir, d);
+  return loopOneWay ? { pts: r.pts.slice(0, r.bIndex + 1), bIndex: r.bIndex } : r;
+}
 function pathLength(pts) { let L = 0; for (let i = 1; i < pts.length; i++) L += haversine(pts[i - 1], pts[i]); return L; }
 // How far to move the centre so the straight-line loop is this long (bisect; length grows with d).
 function offsetFor(A, B, dir, len) {
   let lo = 0, hi = Math.max(len, 1000);
-  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pathLength(throughPoints(A, B, dir, mid).pts) < len) lo = mid; else hi = mid; }
+  for (let i = 0; i < 30; i++) { const mid = (lo + hi) / 2; if (pathLength(throughShape(A, B, dir, mid).pts) < len) lo = mid; else hi = mid; }
   return lo;
 }
 // Shortest sensible loop through B, with some slack so the loops can differ from each other.
-const minThroughKm = (A, B) => (pathLength(throughPoints(A, B, 0, 0).pts) * 1.3 * 1.15) / 1000;
+const minThroughKm = (A, B) => (pathLength(throughShape(A, B, 0, 0).pts) * 1.3 * 1.15) / 1000;
 async function routeThrough(A, B, dir, d, profile) {
-  let { pts, bIndex } = throughPoints(A, B, dir, d);
+  let { pts, bIndex } = throughShape(A, B, dir, d);
   if (lp('lp-snap')) pts = pts.map((p, i) => (i > 0 && i < pts.length - 1 && i !== bIndex ? snapPoint(p) : p));
   const l = await trimSpikes(pts, await fetchRoute(pts, profile), profile, [bIndex]);
   l.bIndex = bIndex;
   return l;
 }
+// What a loop is measured against: its distance, or (when you set a time) its ride time from the
+// pace model, expressed as "metres at the speed the target assumes" so all the sizing maths works unchanged.
+let loopMeasure = (rt) => rt.length;
+function rideSeconds(rt) {
+  const m = typeof modelRide === 'function' ? modelRide(rt) : null;
+  return m ? m.hours * 3600 : rt.length / (planSpeedKmh() / 3.6);
+}
+// Speed for turning a time into a starting distance: your FTP % on the flat (a little off for
+// junctions and the odd hill), or the speed you set. Loops are then sized on their real modelled time.
+function planSpeedKmh() {
+  if (typeof powerMode === 'function' && powerMode()) return speedFor(pacePower(), 0, 0, athlete.weight + BIKE_KG) * 3.6 * 0.92;
+  return Math.max(5, +$('speed').value || 27);
+}
+
 async function makeThroughLoop(A, B, dir, target, profile) {
   let len = target / 1.3; // roads are ~30% longer than straight lines
   let best = null;
@@ -218,14 +238,14 @@ async function makeThroughLoop(A, B, dir, target, profile) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const d = offsetFor(A, B, dir, len);
     const l = await routeThrough(A, B, dir, d, profile);
-    l.err = Math.abs(l.rt.length - target) / target;
+    l.err = Math.abs(loopMeasure(l.rt) - target) / target;
     l.repeat = repeatShare(l.rt);
     l.uturn = uturnMetres(l.rt);
     l.brg = bearing(A, l.pts[1]);
     l.through = true;
     if (!best || badness(l) < badness(best)) best = l;
-    if (l.err < 0.07 || (d === 0 && l.rt.length > target)) break;
-    len *= target / l.rt.length;
+    if (l.err < 0.07 || (d === 0 && loopMeasure(l.rt) > target)) break;
+    len *= target / loopMeasure(l.rt);
   }
   return best;
 }
@@ -235,7 +255,7 @@ async function makeLoop(start, brg, target, profile) {
   let best = null;
   const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
   const consider = (c) => {
-    c.err = Math.abs(c.rt.length - target) / target;
+    c.err = Math.abs(loopMeasure(c.rt) - target) / target;
     c.repeat = repeatShare(c.rt);
     c.uturn = uturnMetres(c.rt);
     c.brg = brg;
@@ -245,7 +265,7 @@ async function makeLoop(start, brg, target, profile) {
     const c = await routeCircle(start, brg, radius, profile);
     consider(c);
     if (c.err < 0.07) break;
-    radius *= target / c.rt.length;
+    radius *= target / loopMeasure(c.rt);
   }
   // Doubling back: try the circle turned a little either way.
   if (lp('lp-noback') && best.repeat > 12) {
@@ -312,7 +332,8 @@ function renderLoops() {
     const li = document.createElement('li');
     if (k === loopPicked) li.classList.add('picked');
     const lines = [
-      `<div class="head">${l.through ? `Out via the ${compass(l.brg)} side` : `Heads ${compass(l.brg)}`}</div>`,
+      `<div class="head">${l.through ? (loopOneWay ? `Via the ${compass(l.brg)} side` : `Out via the ${compass(l.brg)} side`) : `Heads ${compass(l.brg)}`}</div>`,
+      `<div>${fmtDuration(rideSeconds(l.rt) / 3600)} ride time</div>`,
       `<div>${Math.round(l.rt.ascend)} m up</div>`,
       `<div>${Math.round(l.mainPct)}% main road</div>`,
     ];
@@ -339,7 +360,7 @@ function renderLoops() {
       // The point you chose to loop through stays exactly where you put it.
       setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === l.bIndex) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
-        targetKm: +$('loop-km').value, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
+        targetKm: +$('loop-km').value, targetTime: loopMode === 'time' ? $('loop-hrs').value : null, oneWay: loopOneWay, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
         switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through'].map((id) => [id, lp(id)])),
         climbTarget: +$('lp-climb-m').value, intervalMin: +$('lp-interval-min').value, novelty: $('lp-novelty').value,
         stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), uturnM: l.uturn, newPct: l.newPct == null ? null : Math.round(l.newPct) },
@@ -389,7 +410,12 @@ async function generateLoops() {
   loopBusy = true;
   const km = +$('loop-km').value || 50;
   store.set('cp.loopkm', km);
-  const target = km * 1000;
+  // Target by time: size loops by the ride time from your FTP % (or speed), hills and wind included.
+  const byTime = loopMode === 'time' && parseDuration($('loop-hrs').value) > 0;
+  const targetSecs = byTime ? parseDuration($('loop-hrs').value) : null;
+  const target = byTime ? targetSecs * (planSpeedKmh() / 3.6) : km * 1000; // metres, or "metres at your usual speed"
+  loopMeasure = byTime ? (rt) => rideSeconds(rt) * (target / targetSecs) : (rt) => rt.length;
+  loopOneWay = lp('lp-through') && lp('lp-oneway');
   const start = waypoints.length ? [waypoints[0].lng, waypoints[0].lat] : [map.getCenter().lng, map.getCenter().lat];
   const profile = $('profile').value;
   const st = $('loop-status');
@@ -420,10 +446,15 @@ async function generateLoops() {
     // (Points a generated loop placed don't count, so you can regenerate after picking one.)
     const own = waypoints.slice(1).find((w) => !w.auto && haversine(start, [w.lng, w.lat]) > 30);
     const B = lp('lp-through') && own ? [own.lng, own.lat] : null;
-    if (B && haversine(start, B) < 300) { st.textContent = 'Your second point is too close to the start to loop through. Move it, or untick "Loop through my second point".'; return; }
+    if (loopOneWay && !B) { st.textContent = 'Put down a second point to finish at, or untick "Finish there".'; return; }
+    if (B && haversine(start, B) < 300) { st.textContent = 'Your second point is too close to the start. Move it, or untick "Loop through my second point".'; return; }
     if (B && minThroughKm(start, B) * 1000 > target) {
-      $('loop-km').value = Math.ceil(minThroughKm(start, B) / 5) * 5;
-      note = `Your point is ${fmtKm(haversine(start, B))} km away, so loops through it are about ${$('loop-km').value} km.`;
+      const what = loopOneWay ? 'routes there' : 'loops through it';
+      if (byTime) note = `Your point is ${fmtKm(haversine(start, B))} km away, so ${what} take longer than you asked.`;
+      else {
+        $('loop-km').value = Math.ceil(minThroughKm(start, B) / 5) * 5;
+        note = `Your point is ${fmtKm(haversine(start, B))} km away, so ${what} are about ${$('loop-km').value} km.`;
+      }
     }
     const tgt = B ? Math.max(target, minThroughKm(start, B) * 1000) : target;
     const bearings = B ? THROUGH_DIRS : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
@@ -438,7 +469,7 @@ async function generateLoops() {
         loopProg.active.add(brg); progRender();
         try {
           const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
-          if (windHere()) await windTurn(l);
+          if (windHere() && !loopOneWay) await windTurn(l);
           if (l.err < 0.4 && l.rt.length > 1000) found.push(l);
         } catch { /* usually a circle point out at sea */ }
         done++;
@@ -454,13 +485,13 @@ async function generateLoops() {
         l.pts = [...l.pts].reverse();
         l.rt = await fetchRoute(l.pts, profile);
         if (l.through) l.bIndex = l.pts.length - 1 - l.bIndex;
-        l.err = Math.abs(l.rt.length - tgt) / tgt;
+        l.err = Math.abs(loopMeasure(l.rt) - tgt) / tgt;
         l.wind = windStats(l.rt);
       } else l.wind = fwd;
     }
     await Promise.all([worker(), worker(), worker()]);
     // Loops routed before the forecast arrived: give it a few more seconds, then turn them.
-    const late = found.filter((l) => !l.wind);
+    const late = loopOneWay ? [] : found.filter((l) => !l.wind);
     if (late.length) {
       if (!windHere()) {
         progStep('Waiting a moment for the wind forecast…');
@@ -509,7 +540,7 @@ async function generateLoops() {
       const b = new maplibregl.LngLatBounds();
       loopResults.forEach((l) => l.rt.coords.forEach((c) => b.extend([c[0], c[1]])));
       map.fitBounds(b, { padding: 50 });
-      st.textContent = (note ? note + ' ' : '') + `${loopResults.length} loops, best match first. Hover to highlight one, tap to use it.`;
+      st.textContent = (note ? note + ' ' : '') + `${loopResults.length} ${loopOneWay ? "routes" : "loops"}, best match first. Hover to highlight one, tap to use it.`;
     } else {
       st.textContent = note || 'No loops found. The roads around here may be mostly dead ends (hills, coast or water). Try a longer distance, or put down a second point to loop through.';
     }
@@ -520,9 +551,30 @@ async function generateLoops() {
   }
 }
 
+// Distance or time: whichever box you typed in last is the target; the other shows the estimate.
+let loopMode = store.get('cp.loopmode', 'km');
+function parseDuration(s) { // "2:30", "2.5", "150m" -> seconds
+  s = String(s || '').trim();
+  let m = /^(\d+):(\d{1,2})$/.exec(s);
+  if (m) return (+m[1] * 60 + +m[2]) * 60;
+  m = /^(\d+)\s*m(in)?$/.exec(s);
+  if (m) return +m[1] * 60;
+  const h = parseFloat(s);
+  return h > 0 ? h * 3600 : 0;
+}
+const hhmm = (secs) => { const m = Math.round(secs / 60); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
 function updateLoopTime() {
-  const km = +$('loop-km').value || 0;
-  $('loop-time').textContent = km ? `(about ${fmtDuration(km / speedKmh())})` : '';
+  const v = planSpeedKmh();
+  if (loopMode === 'time') {
+    const secs = parseDuration($('loop-hrs').value);
+    if (secs) $('loop-km').value = Math.max(5, Math.round((secs / 3600) * v));
+  } else {
+    const km = +$('loop-km').value || 0;
+    if (km) $('loop-hrs').value = hhmm((km / v) * 3600);
+  }
+  $('loop-km').classList.toggle('est', loopMode === 'time');
+  $('loop-hrs').classList.toggle('est', loopMode !== 'time');
+  $('loop-time').textContent = loopMode === 'time' ? 'Sized by ride time (hills and wind included).' : '';
 }
 
 map.on('load', () => {
@@ -540,7 +592,7 @@ map.on('load', () => {
 });
 
 // Remember the loop switches.
-for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through']) {
+for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through', 'lp-oneway']) {
   $(id).checked = store.get('cp.' + id, $(id).checked);
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).checked));
 }
@@ -549,7 +601,10 @@ for (const id of ['lp-climb-m', 'lp-interval-min', 'lp-novelty']) {
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).value));
 }
 $('loop-km').value = store.get('cp.loopkm', 50);
+$('loop-hrs').value = store.get('cp.loophrs', '');
 updateLoopTime();
-$('loop-km').addEventListener('input', updateLoopTime);
+$('loop-km').addEventListener('input', () => { loopMode = 'km'; store.set('cp.loopmode', 'km'); updateLoopTime(); });
+$('loop-hrs').addEventListener('input', () => { loopMode = 'time'; store.set('cp.loopmode', 'time'); store.set('cp.loophrs', $('loop-hrs').value); updateLoopTime(); });
 $('speed').addEventListener('input', updateLoopTime);
+$('speed').addEventListener('change', updateLoopTime); // also fired when the FTP % changes
 $('loop-go').onclick = generateLoops;

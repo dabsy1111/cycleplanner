@@ -315,6 +315,72 @@ async function makeShapeLoop(start, shape, o, target, profile) {
   return best;
 }
 
+// ---------- topping up short loops, trimming long ones ----------
+// A loop more than 3% off the distance (or time) you asked for gets fixed up:
+// - too short: one extra point off the middle of a long side, pushed outward far enough that the
+//   detour makes up the gap
+// - too long: a corner far from the middle of the loop is pulled in towards it
+// Each gets up to three goes, correcting by how far the last one missed, on the best two sides or
+// corners. The result is kept only if it's an improvement (U-turns and doubling back count too).
+async function extendLoop(l, target, profile) {
+  const off = (x) => (loopMeasure(x.rt) - target) / target;
+  if (Math.abs(off(l)) < 0.03) return l;
+  const long = off(l) > 0;
+  const pts = l.pts;
+  const body = l.through && loopOneWay ? pts : pts.slice(0, -1);
+  const centre = [body.reduce((a, p) => a + p[0], 0) / body.length, body.reduce((a, p) => a + p[1], 0) / body.length];
+  const stretch = loopMeasure(l.rt) / pathLength(pts) || 1.3;
+  const gap = Math.abs(loopMeasure(l.rt) - target); // what has to change
+  const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
+  const fixedB = (shift) => (l.through ? [l.bIndex + shift] : []);
+  // Ways to change it, most promising first. Each builds the new points for a given amount.
+  let ways;
+  if (long) {
+    ways = pts.map((p, k) => ({ k, far: haversine(p, centre) }))
+      .filter(({ k }) => k > 0 && k < pts.length - 1 && !(l.through && k === l.bIndex))
+      .sort((a, b) => b.far - a.far).slice(0, 2)
+      .map(({ k, far }) => ({
+        first: Math.min(far * 0.8, gap / stretch / 2), cap: far * 0.8, shift: 0,
+        build: (m) => { const np = pts.slice(); np[k] = destination(pts[k], bearing(pts[k], centre), m); return np; },
+      }));
+  } else {
+    ways = pts.slice(0, -1).map((p, k) => ({ k, L: haversine(p, pts[k + 1]) }))
+      .filter(({ L }) => L > 500).sort((a, b) => b.L - a.L).slice(0, 2)
+      .map(({ k, L }) => {
+        const b = bearing(pts[k], pts[k + 1]), mid = destination(pts[k], b, L / 2);
+        const sides = [(b + 90) % 360, (b + 270) % 360];
+        const out = haversine(destination(mid, sides[0], 200), centre) >= haversine(destination(mid, sides[1], 200), centre) ? sides[0] : sides[1];
+        return {
+          first: gap / stretch, cap: Infinity, shift: l.through && l.bIndex > k ? 1 : 0,
+          build: (extra) => [...pts.slice(0, k + 1), destination(mid, out, Math.sqrt(((L + extra) / 2) ** 2 - (L / 2) ** 2)), ...pts.slice(k + 1)],
+        };
+      });
+  }
+  let best = l, bestShift = 0;
+  for (const w of ways) {
+    let amount = w.first;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const np = w.build(amount);
+      let c;
+      try { c = await trimSpikes(np, await fetchRoute(np, profile), profile, fixedB(w.shift)); } catch { break; }
+      c.err = Math.abs(off(c));
+      c.repeat = repeatShare(c.rt);
+      c.uturn = uturnMetres(c.rt);
+      if (badness(c) < badness(best)) { best = c; bestShift = w.shift; }
+      if (c.err < 0.03) break;
+      const got = Math.abs(loopMeasure(c.rt) - loopMeasure(l.rt)) * (long === (loopMeasure(c.rt) < loopMeasure(l.rt)) ? 1 : -1);
+      amount = Math.min(w.cap, amount * (got > 100 ? gap / got : 2));
+    }
+    if (best.err < 0.03) break;
+  }
+  if (best !== l) {
+    l.resizedFrom = l.rt.length;
+    if (l.through) l.bIndex += bestShift;
+    Object.assign(l, { pts: best.pts, rt: best.rt, err: best.err, repeat: best.repeat, uturn: best.uturn });
+  }
+  return l;
+}
+
 function mainRoadPct(rt) {
   let main = 0;
   for (const s of rt.segs) if (wayClass(s.tags) === 'main') main += rt.cum[s.i1] - rt.cum[s.i0];
@@ -559,6 +625,7 @@ async function generateLoops() {
         loopProg.active.add(tag); progRender();
         try {
           const l = B ? await makeThroughLoop(start, B, t, tgt, profile) : await shapeLoop(t);
+          await extendLoop(l, B ? tgt : target, profile);
           if (windHere() && !loopOneWay) await windTurn(l);
           if (l.err < 0.4 && l.rt.length > 1000) { found.push(l); showSoFar(); }
         } catch { /* usually a circle point out at sea */ }

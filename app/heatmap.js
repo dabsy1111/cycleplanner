@@ -4,7 +4,10 @@
    Same origin as the app, so no CORS, and the server keeps a copy of every tile in data/heat. */
 
 const HEAT_MIN_Z = 5;    // the proxy has nothing useful below this
-const HEAT_MAX_Z = 16;   // highest zoom the proxy serves; MapLibre stretches z16 tiles beyond it
+// Highest zoom we ask for. The proxy's tiles are 512 px, so a z14 tile stays sharp to about z15,
+// and MapLibre stretches it beyond that. The route scoring reads the same z14 tiles, so looking
+// at the map and scoring routes share one download.
+const HEAT_MAX_Z = 14;
 const heatPrefs = {
   show: store.get('cp.heat', false),
   activity: store.get('cp.heat.act', 'ride'),

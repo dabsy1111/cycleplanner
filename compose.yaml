@@ -16,8 +16,8 @@ services:
       ICU_API_KEY: ""        # intervals.icu > Settings > Developer Settings > API key
       SYNC_HOURS: 6
       # Popularity heatmap proxy. {activity} {color} {z} {x} {y} are filled in. host.docker.internal
-      # is the server itself; the proxy has to listen on 0.0.0.0 (not 127.0.0.1) for this to reach it.
-      HEATMAP_URL: "http://host.docker.internal:8080/{activity}/{color}/{z}/{x}/{y}.png"
+      # is this server; the proxy has to accept connections from outside itself (see README).
+      HEATMAP_URL: "http://host.docker.internal:9999/{activity}/{color}/{z}/{x}/{y}.png"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

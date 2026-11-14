@@ -7,8 +7,10 @@ Env:
   HEATMAP_URL   tile URL template of your heatmap proxy, e.g.
                 http://host.docker.internal:8080/{activity}/{color}/{z}/{x}/{y}.png
                 Empty = heatmap off.
-  HEATMAP_DAYS  keep cached tiles this many days before asking the proxy again (default 30).
-                Older tiles are still served if the proxy is down.
+  HEATMAP_DAYS  keep cached tiles this many days before asking the proxy again (default 90).
+                The heatmap is built from years of rides, so it barely changes. Older tiles are
+                still served if the proxy is down, and nothing is ever deleted.
+  HEATMAP_GAP   seconds between requests to the proxy (default 0.3), so it never gets a burst.
   DATA_DIR      tiles go in DATA_DIR/heat/tiles/<activity>/<color>/<z>/<x>/<y>.png
 """
 import os
@@ -21,13 +23,14 @@ import urllib.request
 import zlib
 
 URL = os.environ.get("HEATMAP_URL", "").strip()
-TTL = float(os.environ.get("HEATMAP_DAYS", "30")) * 86400
+TTL = float(os.environ.get("HEATMAP_DAYS", "90")) * 86400
+GAP = float(os.environ.get("HEATMAP_GAP", "0.3"))
 CACHE = os.path.join(os.environ.get("DATA_DIR", "/data"), "heat", "tiles")
 MIN_Z, MAX_Z = 0, 20
 
 # A tile with no heat (proxy said 404/204, or sent nothing) is remembered as an empty marker
-# file for a day, so the browser and the routing code don't keep asking for ocean and bush.
-EMPTY_TTL = 86400
+# file just as long, so nothing keeps asking for ocean and bush.
+EMPTY_TTL = TTL
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
 
@@ -43,8 +46,18 @@ BLANK_PNG = _blank_png()
 
 NAME = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
 
-# At most 4 requests to the proxy at once; the rest wait their turn.
-upstream_slots = threading.BoundedSemaphore(4)
+# At most 2 requests to the proxy at once, and at least GAP seconds between starting them.
+upstream_slots = threading.BoundedSemaphore(2)
+_gap_lock = threading.Lock()
+_last_start = [0.0]
+
+
+def _wait_turn():
+    with _gap_lock:
+        wait = _last_start[0] + GAP - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_start[0] = time.monotonic()
 # One fetch per tile at a time: a second request for the same tile waits for the first.
 _key_locks = {}
 _key_locks_guard = threading.Lock()
@@ -122,10 +135,12 @@ def _fetch(activity, color, z, x, y):
     url = URL.format(activity=activity, color=color, z=z, x=x, y=y)
     req = urllib.request.Request(url, headers={"User-Agent": "cycleplanner-heat/1.0"})
     try:
-        with upstream_slots, urllib.request.urlopen(req, timeout=15) as r:
-            body = r.read()
-            if r.status == 204 or not body:
-                return b""
+        with upstream_slots:
+            _wait_turn()
+            with urllib.request.urlopen(req, timeout=15) as r:
+                body = r.read()
+                if r.status == 204 or not body:
+                    return b""
     except urllib.error.HTTPError as e:
         if e.code in (204, 404):
             return b""

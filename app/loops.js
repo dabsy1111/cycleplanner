@@ -12,12 +12,6 @@ const lp = (id) => $(id).checked;
 const quietLoops = () => $('opt-traffic').value === 'avoid';
 function fetchRoute(points, profile) { return brouterRoute(points, profile, undefined, 0, {}); }
 
-function circlePoints(start, brg, radius) {
-  const centre = destination(start, brg, radius);
-  const back = (brg + 180) % 360; // bearing from the centre back to the start
-  return [start, ...[90, 180, 270].map((d) => destination(centre, (back + d) % 360, radius)), start];
-}
-
 // ---------- snapping waypoints to bike paths ----------
 let pathIndex = null; // {key, cells: Map(cell -> [[lng,lat],...])}
 const SNAP_CELL = 0.005;
@@ -161,13 +155,6 @@ async function trimSpikes(pts, rt, profile, fixed = []) {
   return { pts, rt };
 }
 
-// ---------- building one loop ----------
-async function routeCircle(start, brg, radius, profile) {
-  let pts = circlePoints(start, brg, radius);
-  if (lp('lp-snap')) pts = [pts[0], ...pts.slice(1, -1).map((p) => snapPoint(p)), pts[pts.length - 1]];
-  return trimSpikes(pts, await fetchRoute(pts, profile), profile);
-}
-
 // ---------- loops through a chosen point ----------
 // A round loop from the start A that passes through your point B. The loop is drawn around a
 // centre C: the radius blends smoothly from |CA| to |CB| so the curve hits both. Moving C off
@@ -251,49 +238,79 @@ async function makeThroughLoop(A, B, dir, target, profile) {
 
 // How much longer the roads are than the circle drawn for them. Starts at 30% and learns from
 // each loop as it finishes, so later directions usually land on the distance first time.
-let loopStretch = [], throughStretch = [];
-const stretchNow = (list = loopStretch) => {
+let throughStretch = [];
+const stretchNow = (list) => {
   if (!list.length) return 1.3;
   const s = [...list].sort((a, b) => a - b);
   return Math.min(2.2, Math.max(1.05, s[s.length >> 1]));
 };
 
-async function makeLoop(start, brg, target, profile) {
-  let radius = target / (2 * Math.PI * stretchNow());
+// ---------- shapes ----------
+// Five loops, one of each shape, each heading a different way (a random spread, so making them
+// again gives new ones). Shapes are drawn with home at a corner, perimeter 1, heading north;
+// `turns` are the rotations allowed. Squares and rectangles stay lined up with the compass so
+// their sides can run along Perth's grid of roads; circles and triangles can point anywhere.
+const R3 = Math.sqrt(3), R2 = Math.SQRT2;
+const SHAPES = [
+  { id: 'circle', name: 'Round', any: true,
+    pts: [0, 1, 2, 3, 4, 5].map((k) => { const a = (180 + 60 * k) * Math.PI / 180, r = 1 / 6; return [r * Math.sin(a), r + r * Math.cos(a)]; }) },
+  { id: 'square', name: 'Square', turns: [0, 90, 180, 270], pts: [[0, 0], [0, 0.25], [0.25, 0.25], [0.25, 0]] },
+  { id: 'rect', name: 'Long rectangle', turns: [0, 90, 180, 270], mirror: true, pts: [[0, 0], [0, 0.375], [0.125, 0.375], [0.125, 0]] },
+  { id: 'diamond', name: 'Diamond', turns: [0, 90, 180, 270], pts: [[0, 0], [-0.25 / R2, 0.25 / R2], [0, 0.5 / R2], [0.25 / R2, 0.25 / R2]] },
+  { id: 'triangle', name: 'Triangle', any: true, pts: [[0, 0], [-1 / 6, R3 / 6], [1 / 6, R3 / 6]] },
+];
+const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+// Where home sits relative to the rest of the shape, once turned (and mirrored).
+function placeShape(shape, rot, mirror) {
+  const r = rot * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return shape.pts.map(([x, y]) => { if (mirror) x = -x; return [x * c + y * s, -x * s + y * c]; });
+}
+const shapeHeading = (xy) => { const n = xy.length; const cx = xy.reduce((a, p) => a + p[0], 0) / n, cy = xy.reduce((a, p) => a + p[1], 0) / n; return (Math.atan2(cx, cy) * 180 / Math.PI + 360) % 360; };
+// Ways to draw this shape, nearest the wanted heading first.
+function orientations(shape, want) {
+  const opts = shape.any
+    ? [0, 72, -72, 144, -144].map((d) => ({ rot: (want + d + 360) % 360, mirror: false }))
+    : shape.turns.flatMap((rot) => (shape.mirror ? [false, true] : [false]).map((mirror) => ({ rot, mirror })));
+  for (const o of opts) o.heading = shapeHeading(placeShape(shape, o.rot, o.mirror));
+  return opts.sort((a, b) => angDiff(a.heading, want) - angDiff(b.heading, want));
+}
+function shapePoints(start, shape, o, perimeter) {
+  const pts = placeShape(shape, o.rot, o.mirror).map(([x, y], i) => (i === 0 ? start
+    : destination(start, (Math.atan2(x, y) * 180 / Math.PI + 360) % 360, Math.hypot(x, y) * perimeter)));
+  return [...pts, start];
+}
+async function routeShape(start, shape, o, perimeter, profile) {
+  let pts = shapePoints(start, shape, o, perimeter);
+  if (lp('lp-snap')) pts = [pts[0], ...pts.slice(1, -1).map((p) => snapPoint(p)), pts[pts.length - 1]];
+  return trimSpikes(pts, await fetchRoute(pts, profile), profile);
+}
+let shapeStretch = []; // roads vs the straight lines between the corners, learned as loops finish
+async function makeShapeLoop(start, shape, o, target, profile) {
+  let perimeter = target / stretchNow(shapeStretch);
   let best = null;
   const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
-  const tried = new Set(); // turned circles already routed (doubling back and U-turns share some)
-  const consider = (c, b) => {
+  const consider = (c, oo) => {
     c.err = Math.abs(loopMeasure(c.rt) - target) / target;
     c.repeat = repeatShare(c.rt);
     c.uturn = uturnMetres(c.rt);
-    c.brg = b;
+    c.brg = oo.heading;
+    c.shape = shape.name; c.shapeId = shape.id;
     if (!best || badness(c) < badness(best)) best = c;
   };
-  const turned = async (turn) => {
-    const b = (brg + turn + 360) % 360;
-    if (tried.has(b)) return;
-    tried.add(b);
-    try { consider(await routeCircle(start, b, radius, profile), b); }
-    catch { /* that variation hit the sea or similar */ }
-  };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const c = await routeCircle(start, brg, radius, profile);
-    consider(c, brg);
-    const ratio = loopMeasure(c.rt) / (2 * Math.PI * radius);
-    if (c.err < 0.07) { loopStretch.push(ratio); break; }
-    radius *= target / loopMeasure(c.rt);
+    const c = await routeShape(start, shape, o, perimeter, profile);
+    consider(c, o);
+    if (c.err < 0.07) { shapeStretch.push(loopMeasure(c.rt) / perimeter); break; }
+    perimeter *= target / loopMeasure(c.rt);
   }
-  tried.add(brg);
-  // Doubling back: try the circle turned a little either way.
-  if (lp('lp-noback') && best.repeat > 12) {
-    for (const turn of [25, -25]) { if (best.repeat > 12) await turned(turn); }
-  }
-  // U-turns: try the circle turned a little each way and keep the cleanest. A short one
-  // (under 200 m) only gets the two small turns; it's not worth four more routes.
-  for (const turn of [12, -12, 25, -25]) {
-    if (best.uturn === 0 || (Math.abs(turn) === 25 && best.uturn < 200)) continue;
-    await turned(turn);
+  // Doubling back or U-turns: try it turned a little. Grid shapes only a little, to stay on the grid.
+  const turns = shape.any ? [12, -12, 25, -25] : [10, -10];
+  for (const t of turns) {
+    if (best.uturn < (Math.abs(t) > 12 ? 200 : 1) && !(lp('lp-noback') && best.repeat > 12)) continue;
+    const oo = { ...o, rot: (o.rot + t + 360) % 360 };
+    oo.heading = shapeHeading(placeShape(shape, oo.rot, oo.mirror));
+    try { consider(await routeShape(start, shape, oo, perimeter, profile), oo); }
+    catch { /* that variation hit the sea or similar */ }
   }
   return best;
 }
@@ -346,7 +363,7 @@ function renderLoops() {
     const li = document.createElement('li');
     if (k === loopPicked) li.classList.add('picked');
     const lines = [
-      `<div class="head">${l.through ? (loopOneWay ? `Via the ${compass(l.brg)} side` : `Out via the ${compass(l.brg)} side`) : `Heads ${compass(l.brg)}`}</div>`,
+      `<div class="head">${l.through ? (loopOneWay ? `Via the ${compass(l.brg)} side` : `Out via the ${compass(l.brg)} side`) : `${l.shape || 'Loop'}, heads ${compass(l.brg)}`}</div>`,
       `<div>${fmtDuration(rideSeconds(l.rt) / 3600)} ride time</div>`,
       `<div>${Math.round(l.rt.ascend)} m up</div>`,
       `<div>${Math.round(l.mainPct)}% main road</div>`,
@@ -373,7 +390,7 @@ function renderLoops() {
       // The point you chose to loop through stays exactly where you put it.
       setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === l.bIndex) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
-        targetKm: +$('loop-km').value, targetTime: loopMode === 'time' ? $('loop-hrs').value : null, oneWay: loopOneWay, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
+        targetKm: +$('loop-km').value, targetTime: loopMode === 'time' ? $('loop-hrs').value : null, oneWay: loopOneWay, shape: l.shapeId || null, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
         switches: Object.fromEntries(['lp-noback', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-through'].map((id) => [id, lp(id)])),
         traffic: $('opt-traffic').value,
         climbTarget: +$('lp-climb-m').value, intervalMin: +$('eff-min').value, intervalTerrain: $('eff-terrain').value, novelty: $('lp-novelty').value,
@@ -411,11 +428,11 @@ function progStep(text) {
 let loopTimings = []; // [step, seconds], sent with problem reports
 function progRender() {
   const p = loopProg, secs = Math.round((Date.now() - p.t0) / 1000);
-  const dirs = [...p.active].map((b) => (typeof b === 'number' ? compass(b) : '')).filter(Boolean);
-  const step = p.total && p.done < p.total && dirs.length ? `Routing loops heading ${dirs.join(', ')}…` : p.step;
+  const dirs = [...p.active].map((b) => (typeof b === 'number' ? compass(b) : b)).filter(Boolean);
+  const step = p.total && p.done < p.total && dirs.length ? `Routing loops: ${dirs.join(', ')}…` : p.step;
   $('loop-progress').innerHTML = `<div class="lp-step"><span class="spinner"></span>${escapeHtml(step)}</div>` +
     (p.total ? `<div class="dl-bar"><div style="width:${((100 * p.done) / p.total).toFixed(0)}%"></div></div>` +
-      `<div class="small">${p.done} of ${p.total} directions tried · ${p.found} loop${p.found === 1 ? '' : 's'} so far · ${secs} s</div>` :
+      `<div class="small">${p.done} of ${p.total} tried · ${p.found} loop${p.found === 1 ? '' : 's'} so far · ${secs} s</div>` :
       `<div class="small">${secs} s</div>`);
 }
 
@@ -427,14 +444,15 @@ function shortlist(list, final = false) {
     if (l.newPct === undefined) l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
     if (l.liked === undefined) l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
   }
-  if (!final) { const close = list.filter((l) => l.err < 0.25); if (close.length) list = close; }
+  const shapes = list.every((l) => l.shapeId); // one of each shape: keep them all
+  if (!final && !shapes) { const close = list.filter((l) => l.err < 0.25); if (close.length) list = close; }
   list = [...list].sort((a, b) => loopScore(a) - loopScore(b));
   // Drop near-copies (common when every direction ends up on the same roads)...
   const distinct = [];
   for (const l of list) if (!distinct.some((d) => sameRoute(d.rt, l.rt))) distinct.push(l);
   // ...and loops with long U-turns when there are enough clean ones.
   const clean = distinct.filter((l) => l.uturn < 500);
-  return (clean.length >= 3 ? clean : distinct).slice(0, 6);
+  return (clean.length >= 3 && !shapes ? clean : distinct).slice(0, 5);
 }
 
 async function generateLoops() {
@@ -489,11 +507,15 @@ async function generateLoops() {
       }
     }
     const tgt = B ? Math.max(target, minThroughKm(start, B) * 1000) : target;
-    const bearings = B ? THROUGH_DIRS : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
+    // Through your point: eight directions, best five shown. Otherwise one loop of each shape,
+    // spread round the compass from a random start so every go gives new ones.
+    const base = Math.random() * 360;
+    const order = [...SHAPES].sort(() => Math.random() - 0.5);
+    const tasks = B ? THROUGH_DIRS : order.map((shape, k) => ({ shape, want: (base + 72 * k) % 360 }));
     const found = [];
     let done = 0;
-    loopStretch = []; throughStretch = [];
-    loopProg.total = bearings.length;
+    throughStretch = []; shapeStretch = [];
+    loopProg.total = tasks.length;
     progStep('Routing loops');
     // Loops appear in the list as they're found, so you can look at (and pick) one while the rest
     // are still being worked out. The final list is ranked once everything is in.
@@ -514,18 +536,34 @@ async function generateLoops() {
         map.fitBounds(b, { padding: 50 });
       }
     };
-    const queue = [...bearings];
+    // A shape that ends up in the sea, way off the distance, or on the same roads as one already
+    // found is drawn again pointing another way (up to three tries).
+    async function shapeLoop(t) {
+      let best = null;
+      for (const o of orientations(t.shape, t.want).slice(0, 3)) {
+        let l;
+        try { l = await makeShapeLoop(start, t.shape, o, target, profile); } catch { continue; }
+        if (l.rt.length < 1000) continue;
+        const copy = found.some((f) => sameRoute(f.rt, l.rt));
+        if (!copy && l.err < 0.25) return l;
+        if (!copy && (!best || l.err < best.err)) best = l;
+      }
+      if (best) return best;
+      throw new Error('no loop for this shape');
+    }
+    const queue = [...tasks];
     const worker = async () => {
       while (queue.length) {
-        const brg = queue.shift();
-        loopProg.active.add(brg); progRender();
+        const t = queue.shift();
+        const tag = B ? t : t.shape.name.toLowerCase();
+        loopProg.active.add(tag); progRender();
         try {
-          const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
+          const l = B ? await makeThroughLoop(start, B, t, tgt, profile) : await shapeLoop(t);
           if (windHere() && !loopOneWay) await windTurn(l);
           if (l.err < 0.4 && l.rt.length > 1000) { found.push(l); showSoFar(); }
         } catch { /* usually a circle point out at sea */ }
         done++;
-        loopProg.active.delete(brg);
+        loopProg.active.delete(tag);
         loopProg.done = done; loopProg.found = found.length;
         progRender();
       }
@@ -564,7 +602,7 @@ async function generateLoops() {
     progStep(`Ranking ${found.length} loops…`);
     // Prefer loops within 25% of the distance; only fall back to looser ones if that leaves too few.
     const close = found.filter((l) => l.err < 0.25);
-    let list = close.length >= 3 ? close : found;
+    let list = close.length >= 3 && found.some((l) => l.through) ? close : found;
     if (list.length && close.length < 3 && found.length > close.length) note = (note ? note + ' ' : '') + 'Few loops fit that distance here, so some are further off it.';
     if (lp('lp-interval') && found.length) {
       progStep('Checking lights and crossings for interval stretches…');

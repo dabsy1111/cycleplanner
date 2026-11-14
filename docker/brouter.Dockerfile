@@ -1,7 +1,11 @@
 FROM alpine:3.20 AS fetch
 ARG BROUTER_VERSION=1.7.9
 COPY docker/patch-profile.awk /tmp/patch-profile.awk
-RUN apk add --no-cache curl unzip \
+COPY docker/brouter-heat /tmp/brouter-heat
+# Also fetches the two BRouter source files the popular-roads patch touches, from the same release,
+# and patches them. patch fails the build if BRouter's code has moved on, rather than shipping a
+# half-patched router.
+RUN apk add --no-cache curl unzip patch \
  && curl -fsSL -o /tmp/brouter.zip \
       "https://github.com/abrensch/brouter/releases/download/v${BROUTER_VERSION}/brouter-${BROUTER_VERSION}.zip" \
  && unzip -q /tmp/brouter.zip -d /tmp \
@@ -10,13 +14,31 @@ RUN apk add --no-cache curl unzip \
  && mv "/tmp/brouter-${BROUTER_VERSION}/profiles2" /opt/brouter/profiles-default \
  && for p in fastbike fastbike-lowtraffic safety trekking gravel; do \
       awk -f /tmp/patch-profile.awk "/opt/brouter/profiles-default/$p.brf" > "/opt/brouter/profiles-default/cp-$p.brf" || exit 1; \
-    done
+    done \
+ && mkdir -p /tmp/src/brouter-core/src/main/java/btools/router && cd /tmp/src \
+ && for f in OsmPath RoutingContext; do \
+      curl -fsSL -o "brouter-core/src/main/java/btools/router/$f.java" \
+        "https://raw.githubusercontent.com/abrensch/brouter/v${BROUTER_VERSION}/brouter-core/src/main/java/btools/router/$f.java" || exit 1; \
+    done \
+ && patch -p1 < "/tmp/brouter-heat/brouter-${BROUTER_VERSION}-heat.patch"
+
+# Compile the patched classes against the release jar and swap them in. BRouter 1.7.9 targets Java 11.
+FROM eclipse-temurin:21-jdk AS heat
+COPY --from=fetch /opt/brouter/brouter.jar /build/brouter.jar
+COPY --from=fetch /tmp/src /build/src
+COPY docker/brouter-heat/HeatGrid.java /build/HeatGrid.java
+RUN cd /build \
+ && javac -nowarn --release 11 -cp brouter.jar -d out HeatGrid.java \
+      src/brouter-core/src/main/java/btools/router/OsmPath.java \
+      src/brouter-core/src/main/java/btools/router/RoutingContext.java \
+ && cd out && jar uf /build/brouter.jar btools/router/*.class
 
 FROM eclipse-temurin:21-jre
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=fetch /opt/brouter /opt/brouter
+COPY --from=heat /build/brouter.jar /opt/brouter/brouter.jar
 COPY docker/brouter-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENV TILES="E115_S35" \

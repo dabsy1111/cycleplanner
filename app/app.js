@@ -347,6 +347,10 @@ let patchedProfilesBroken = false;
 const SIGNAL_PENALTY = 300; // metres of detour a traffic light is worth avoiding
 const TURN_PENALTY = 60;     // metres per turn
 
+// Popular roads (patched BRouter, docker/brouter-heat): a road nobody rides costs 1 + this
+// times what the busiest road costs.
+const HEAT_STRENGTH = { off: 0, prefer: 0.5, strong: 1.5 };
+
 function brouterUrl(points, profile, stock = false, alt = 0, over = {}) {
   const lonlats = points.map((p) => `${(+p[0]).toFixed(6)},${(+p[1]).toFixed(6)}`).join('|');
   let url = `${BROUTER_URL}?lonlats=${lonlats}&alternativeidx=${alt}&format=geojson`;
@@ -359,6 +363,8 @@ function brouterUrl(points, profile, stock = false, alt = 0, over = {}) {
   if ((over.traffic ?? $('opt-traffic').value) === 'avoid' && TRAFFIC_PARAM[profile]) url += `&profile:${TRAFFIC_PARAM[profile][0]}=${TRAFFIC_PARAM[profile][1]}`;
   if ($('opt-lights').checked) url += `&profile:signal_penalty=${SIGNAL_PENALTY}`;
   if ($('opt-turns').checked) url += `&profile:turn_penalty=${TURN_PENALTY}`;
+  const heat = HEAT_STRENGTH[$('opt-popular').value];
+  if (heat) url += `&profile:heat_strength=${heat}`;
   return url;
 }
 
@@ -925,6 +931,7 @@ $('clear').onclick = () => { if (waypoints.length) setWaypoints([]); };
 $('gpx-wpt').onchange = () => store.set('cp.gpxwpt', $('gpx-wpt').checked);
 $('opt-footpaths').onchange = () => { store.set('cp.footpaths', $('opt-footpaths').checked); requestRoute(false); };
 $('opt-traffic').onchange = () => { store.set('cp.traffic', $('opt-traffic').value); requestRoute(false); };
+$('opt-popular').onchange = () => { store.set('cp.popular', $('opt-popular').value); requestRoute(false); };
 $('profile').onchange = () => { store.set('cp.profile', $('profile').value); writeHash(); requestRoute(false); };
 $('speed').oninput = () => { store.set('cp.speed', $('speed').value); renderStats(); };
 $('colour-by').onchange = () => { store.set('cp.colour', $('colour-by').value); if (map.getSource('route')) map.getSource('route').setData(routeFeatures()); };
@@ -1012,6 +1019,7 @@ function restoreSettings() {
   $('gpx-wpt').checked = store.get('cp.gpxwpt', false);
   $('opt-footpaths').checked = store.get('cp.footpaths', true);
   $('opt-traffic').value = store.get('cp.traffic', 'normal');
+  $('opt-popular').value = store.get('cp.popular', 'off');
   for (const [k, def] of Object.entries(MAP_DETAILS)) $('md-' + k).checked = store.get('cp.md.' + k, def);
   applyMapDetails();
   // Collapsible panel sections remember whether they were open.

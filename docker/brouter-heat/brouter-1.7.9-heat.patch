@@ -1,0 +1,31 @@
+--- a/brouter-core/src/main/java/btools/router/OsmPath.java
++++ b/brouter-core/src/main/java/btools/router/OsmPath.java
+@@ -303,6 +303,10 @@
+       double elevation = ele2 == Short.MIN_VALUE ? 100. : ele2 / 4.;
+ 
+       double sectionCost = processWaySection(rc, dist, delta_h, elevation, angle, cosangle, isStartpoint, nsection, lastpriorityclassifier);
++      // Cycle Planner: popular roads cost less than roads nobody rides (heat_strength, HeatGrid).
++      if (rc.heatStrength > 0. && sectionCost > 0.) {
++        sectionCost *= HeatGrid.multiplier(lon1, lat1, lon2, lat2, dist, rc.heatStrength);
++      }
+       if ((sectionCost < 0. || costfactor > 9998. && !detailMode) || sectionCost + cost >= 2000000000.) {
+         cost = -1;
+         return;
+--- a/brouter-core/src/main/java/btools/router/RoutingContext.java
++++ b/brouter-core/src/main/java/btools/router/RoutingContext.java
+@@ -54,6 +54,7 @@
+   public int memoryclass = 64;
+ 
+   public boolean carMode;
++  public double heatStrength; // Cycle Planner: profile variable heat_strength, 0 = off
+   public boolean bikeMode;
+   public boolean footMode;
+   public boolean considerTurnRestrictions;
+@@ -116,6 +117,7 @@
+     setModel(expctxGlobal._modelClass);
+ 
+     carMode = 0.f != expctxGlobal.getVariableValue("validForCars", 0.f);
++    heatStrength = expctxGlobal.getVariableValue("heat_strength", 0.f);
+     bikeMode = 0.f != expctxGlobal.getVariableValue("validForBikes", 0.f);
+     footMode = 0.f != expctxGlobal.getVariableValue("validForFoot", 0.f);
+ 

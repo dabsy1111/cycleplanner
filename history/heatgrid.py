@@ -9,7 +9,8 @@ Pipeline:
      the middle first. Tiles come through heattiles, so they're throttled, shared with the map
      overlay, and only re-downloaded after HEATMAP_DAYS (90). Runs at start, then checks daily.
   2. Each PNG is decoded to its alpha channel and kept as data/heat/grid/ride/14/<x>/<y>.a
-     (zlib-compressed, 2-byte width header). Mostly-empty tiles compress to a few KB.
+     (zlib-compressed, 2-byte width header). Mostly-empty tiles compress to a few KB. Tiles with
+     no rides at all get an <y>.empty marker instead. The patched BRouter reads the same files.
   3. score(route) samples the route every few metres, reads the brightest pixel within ~8 m of
      each sample (heat lines and road lines are often a few metres apart), and reports how much
      of the route has data and how popular it is.
@@ -136,6 +137,10 @@ def _save_grid(x, y, width, alpha):
     with open(tmp, "wb") as f:
         f.write(struct.pack(">H", width) + zlib.compress(alpha, 6))
     os.replace(tmp, p)
+    try:
+        os.remove(p[:-2] + ".empty")  # it has heat now
+    except OSError:
+        pass
 
 
 def _load_grid(x, y):
@@ -166,6 +171,11 @@ def ensure_tile(x, y, allow_fetch=True):
     if tile is None:
         return "missing"
     if tile == b"":
+        # Marker for the patched BRouter: nobody rides here (vs no file at all = not downloaded).
+        marker = grid_path(x, y)[:-2] + ".empty"
+        if not os.path.exists(marker):
+            os.makedirs(os.path.dirname(marker), exist_ok=True)
+            open(marker, "wb").close()
         return "empty"
     png = heattiles.tile_path(ACTIVITY, color, Z, x, y)
     gp = grid_path(x, y)

@@ -8,7 +8,7 @@ let serverRoutes = null; // null = server not reachable, use this browser's stor
 function getOptions() {
   return {
     footpaths: $('opt-footpaths').checked, traffic: $('opt-traffic').value,
-    lights: $('opt-lights').checked, turns: $('opt-turns').checked,
+    lights: $('opt-lights').checked, turns: $('opt-turns').checked, popular: $('opt-popular').value,
   };
 }
 function applyOptions(o) {
@@ -17,6 +17,7 @@ function applyOptions(o) {
   if ('traffic' in o) $('opt-traffic').value = o.traffic;
   if ('lights' in o) $('opt-lights').checked = !!o.lights;
   if ('turns' in o) $('opt-turns').checked = !!o.turns;
+  if ('popular' in o) $('opt-popular').value = o.popular;
 }
 for (const id of ['opt-lights', 'opt-turns']) {
   $(id).checked = store.get('cp.' + id, false);

@@ -4,11 +4,15 @@
 #                    cost at least 6x, so they're only used as short links
 #   turn_penalty     extra cost (metres) added to every turn, for fewer turns
 #   signal_penalty   extra cost (metres) at traffic lights; a third of it at stop/give way
+#   heat_strength    prefer roads that are popular on the ride heatmap: a road nobody rides costs
+#                    (1 + heat_strength) times the busiest. Needs the patched BRouter
+#                    (docker/brouter-heat); stock BRouter ignores it. 0 = off.
 /^---context:global/ && !g {
   print
   print "assign avoid_footpaths = true # %avoid_footpaths% | Strongly avoid footpaths that are not signed for bikes | boolean"
   print "assign turn_penalty = 0 # %turn_penalty% | Extra cost per turn, in metres | number"
   print "assign signal_penalty = 0 # %signal_penalty% | Extra cost per traffic light, in metres | number"
+  print "assign heat_strength = 0 # %heat_strength% | Prefer popular roads (ride heatmap): 0 off, 1 = unridden roads cost double | number"
   g = 1; next
 }
 /^---context:way/ { ctx = "way" }

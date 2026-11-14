@@ -70,6 +70,11 @@
         <span><b>Fewer traffic lights</b><small>Treats every set of lights as worth a 300 m detour, and stop or give way signs as 100 m. Good for training rides where stopping wrecks an effort. Routes get a little longer.</small></span></label>
       <label class="opt"><input id="opt-turns" type="checkbox">
         <span><b>Fewer turns</b><small>Adds a cost to every turn, so the route sticks to fewer, longer roads instead of zigzagging through side streets. Easier to follow without looking at the screen.</small></span></label>
+      <div class="opt"><span><b>Popular roads <select id="opt-popular" class="inline" aria-label="Popular roads">
+          <option value="off">ignore</option>
+          <option value="prefer">prefer</option>
+          <option value="strong">strongly prefer</option>
+        </select></b><small>Uses the ride heatmap to favour roads lots of people ride. Prefer: a road nobody rides counts as half as long again as a busy one. Strongly prefer: two and a half times. Where there's no heatmap data yet, roads count as middling.</small></span></div>
       <label class="opt"><input id="opt-alts" type="checkbox">
         <span><b>Show alternatives</b><small>Routes the same points a few different ways (fastest, safest, touring) and keeps up to three that are really different from yours: each is labelled with what it wins on: shortest, least climbing, quietest or most popular (from the ride heatmap). Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
       <ul id="alts" class="stops"></ul>

@@ -154,10 +154,10 @@ details.sec.more > details.sec > summary { font-size: 14px; }
 .opts { justify-content: space-between; }
 .opts .check { margin: 0; }
 
-label.opt { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 8px; cursor: pointer; }
+label.opt, div.opt { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0 8px; cursor: pointer; }
 label.opt input { margin-top: 3px; flex: none; }
-label.opt b { display: block; font-weight: 600; font-size: 13.5px; }
-label.opt small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.opt b { display: block; font-weight: 600; font-size: 13.5px; }
+.opt small { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .loopopts .row.small { margin: -2px 0 6px 24px; }
 .stops li .badge { font-size: 11px; padding: 0 5px; border-radius: 4px; margin-left: 4px; white-space: nowrap; }
 .badge.warn { background: #fff4e5; color: #8a4b00; }
@@ -209,3 +209,4 @@ textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-
 .loop-progress .small { margin-top: 4px; color: var(--muted); }
 .spinner { width: 14px; height: 14px; border: 2px solid #a5d8ff; border-top-color: #1c7ed6; border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
+div.opt > span { padding-left: 21px; }

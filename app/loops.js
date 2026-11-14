@@ -27,7 +27,7 @@ async function loadPathIndex(start, radius) {
   const key = [s, w, n, e].map((v) => v.toFixed(2)).join(',');
   if (pathIndex && pathIndex.key === key) return pathIndex;
   const b = `${s.toFixed(4)},${w.toFixed(4)},${n.toFixed(4)},${e.toFixed(4)}`;
-  // The server keeps a weekly copy of every bike path around Perth: instant, no Overpass wait.
+  // The server keeps a copy of every bike path around Perth, refreshed every 6 months: instant, no Overpass wait.
   try {
     const res = await fetch(`/api/bikepaths?bbox=${b}`);
     if (res.ok) {

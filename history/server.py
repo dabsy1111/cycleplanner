@@ -469,11 +469,11 @@ def overpass_query(q):
 
 
 # ---------- bike paths: a local copy for the loop generator ----------
-# One Overpass download of every bike path in the area, refreshed weekly, so the loop
+# One Overpass download of every bike path in the area, refreshed every 6 months, so the loop
 # generator doesn't wait on Overpass every time it snaps points to paths.
 BIKEPATH_DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "bikepaths")
 BIKEPATH_BBOX = os.environ.get("BIKEPATH_BBOX", "-32.80,115.55,-31.40,116.30")  # south,west,north,east: Mandurah to Two Rocks, coast to the hills
-BIKEPATH_DAYS = float(os.environ.get("BIKEPATH_DAYS", "7"))
+BIKEPATH_DAYS = float(os.environ.get("BIKEPATH_DAYS", "182"))  # new paths are rare: every 6 months
 BP_CELL = 0.005  # must match SNAP_CELL in app/loops.js
 BP_STEP = 0.25   # downloaded in ~25 km tiles: one query for the whole area is too big for Overpass
 # Each tile is saved as soon as it arrives, so a restart (e.g. an update) carries on where it
@@ -569,7 +569,7 @@ def bikepath_scheduler():
             refresh_bikepaths()
         except Exception as e:
             bikepaths["error"] = str(e)[:200]
-        time.sleep(3600)  # checks hourly; a tile is only downloaded again once it's a week old
+        time.sleep(3600)  # checks hourly; a tile is only downloaded again once it's BIKEPATH_DAYS old
 
 
 def bikepaths_in(bbox):

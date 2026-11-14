@@ -23,6 +23,7 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `ICU_API_KEY` (history) | empty | Your intervals.icu API key, from intervals.icu → Settings → Developer Settings. Turns on ride history. |
 | `SYNC_HOURS` (history) | `6` | How often to pull new rides from intervals.icu. `0` = only when you press Sync. |
 | `HISTORY_SINCE` (history) | `2015-01-01` | Oldest rides to fetch. |
+| `BIKEPATH_DAYS` (history) | `182` | Download the area's bike paths again once they're this old (6 months). |
 | `HEATMAP_URL` (history) | empty | Tile URL of your popularity heatmap proxy, with `{activity}` `{color}` `{z}` `{x}` `{y}`. See below. |
 | `HEATMAP_DAYS` (history) | `90` | Ask the heatmap proxy again for tiles older than this. Old tiles are kept and used if the proxy is down. |
 | `HEATMAP_GAP` (history) | `0.3` | Seconds between requests to the heatmap proxy. |

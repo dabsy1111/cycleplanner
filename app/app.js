@@ -938,6 +938,7 @@ function applyBase() {
   // The base map's 3D buildings would sit on top of the photo.
   for (const l of map.getStyle().layers) if (l.type === 'fill-extrusion') map.setLayoutProperty(l.id, 'visibility', b === 'map' ? 'visible' : 'none');
   if (b !== 'map') store.set('cp.photo', b); // remembered for the map button
+  if (typeof heatBaseChanged === 'function') heatBaseChanged(); // heatmap colours follow the background
   const btn = document.querySelector('.base-toggle');
   if (btn) {
     btn.classList.toggle('on', b !== 'map');

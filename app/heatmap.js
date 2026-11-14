@@ -11,15 +11,28 @@ const HEAT_MAX_Z = 14;
 const heatPrefs = {
   show: store.get('cp.heat', false),
   activity: store.get('cp.heat.act', 'ride'),
-  color: store.get('cp.heat.col', 'hot'),
+  color: store.get('cp.heat.col', 'auto'),
   opacity: store.get('cp.heat.op', 60),
 };
 let heatErrors = 0;      // failed tiles since the last change of settings
 let heatChecking = false;
 let heatRetry = 0;
 
+// 'auto' picks the scheme that shows the busiest roads best on the current background: on the light
+// map grey makes them the darkest lines; on the photos hot makes them glow near-white.
+function heatColor() {
+  if (heatPrefs.color !== 'auto') return heatPrefs.color;
+  return $('lyr-base').value === 'map' ? 'gray' : 'hot';
+}
+
 function heatTileUrl() {
-  return `${location.origin}/tiles/heat/${encodeURIComponent(heatPrefs.activity)}/${encodeURIComponent(heatPrefs.color)}/{z}/{x}/{y}.png`;
+  return `${location.origin}/tiles/heat/${encodeURIComponent(heatPrefs.activity)}/${encodeURIComponent(heatColor())}/{z}/{x}/{y}.png`;
+}
+
+// Called by applyBase() in app.js whenever the background changes.
+let heatShownColor = null;
+function heatBaseChanged() {
+  if (heatShownColor !== null && heatColor() !== heatShownColor) setHeatSource();
 }
 
 function heatStatus(text) { $('heat-status').textContent = text || ''; }
@@ -29,7 +42,7 @@ async function checkHeatServer() {
   if (heatChecking) return;
   heatChecking = true;
   try {
-    const res = await fetch(`/api/heat/status?activity=${encodeURIComponent(heatPrefs.activity)}&color=${encodeURIComponent(heatPrefs.color)}`);
+    const res = await fetch(`/api/heat/status?activity=${encodeURIComponent(heatPrefs.activity)}&color=${encodeURIComponent(heatColor())}`);
     if (!res.ok) throw new Error();
     const s = await res.json();
     if (!s.configured) heatStatus('No heatmap source set: add HEATMAP_URL to the history service in the stack, then redeploy.');
@@ -41,7 +54,7 @@ async function checkHeatServer() {
     else if (heatErrors && !s.layer_error) {
       // The proxy is back: MapLibre doesn't retry tiles that failed, so ask for them again.
       setHeatSource();
-    } else if (s.layer_error) heatStatus(`The proxy won't serve ${heatPrefs.activity}/${heatPrefs.color}: ${s.layer_error}`);
+    } else if (s.layer_error) heatStatus(`The proxy won't serve ${heatPrefs.activity}/${heatColor()}: ${s.layer_error}`);
     else heatStatus('');
   } catch {
     heatStatus('The history service isn\'t running, and it\'s what fetches heatmap tiles.');
@@ -63,6 +76,7 @@ function setHeatSource() {
   if (!src) return;
   heatErrors = 0;
   heatStatus('');
+  heatShownColor = heatColor();
   src.setTiles([heatTileUrl()]);
 }
 
@@ -71,6 +85,7 @@ map.on('load', () => {
     type: 'raster', tileSize: 256, minzoom: HEAT_MIN_Z, maxzoom: HEAT_MAX_Z,
     tiles: [heatTileUrl()],
   });
+  heatShownColor = heatColor();
   // Under the street names and everything this app draws (history, marked roads, alternatives,
   // the route and its markers), above the base map and the aerial/satellite photos.
   const firstLabel = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;

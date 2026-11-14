@@ -67,3 +67,36 @@ routeHooks.push((rt) => {
     if (typeof altRoutes !== 'undefined' && altRoutes.length) renderAlts(); // 'most popular' needs this route's score too
   });
 });
+
+// ---------- download progress (under Route options > Popular roads) ----------
+// The history service downloads the heatmap for the bike-path area in the background. Show how far
+// it's got while it's downloading; stay quiet during the daily check, which downloads nothing.
+async function pollHeatGrid() {
+  const el = $('heat-progress');
+  let again = 0;
+  try {
+    const st = await (await fetch('/api/heat/status')).json();
+    if (!st.configured) { el.hidden = true; return; } // no heatmap set up: nothing to show, stop asking
+    const g = await (await fetch('/api/heat/grid')).json();
+    const fmt = (n) => n.toLocaleString();
+    if (g.running && g.fetched > 0) {
+      const pct = g.total ? Math.floor((100 * g.done) / g.total) : 0;
+      el.textContent = `Heatmap data: ${fmt(g.done)} of ${fmt(g.total)} areas (${pct}%) downloaded. Routes use it as it arrives.` +
+        (st.reachable === false ? ' The heatmap proxy isn\'t answering, so it\'s paused.' : '');
+      el.hidden = false;
+      again = 15000;
+    } else if (!g.running && g.missing > 0) {
+      el.textContent = `Heatmap data: ${fmt(g.missing)} of ${fmt(g.total)} areas couldn't be downloaded (is the heatmap proxy up, and its login still current?). It tries again tomorrow.`;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+      // Not started yet (the service waits a little after starting up) or a check still running: look again.
+      if (g.running || !g.started) again = 15000;
+    }
+  } catch {
+    el.hidden = true;
+    again = 60000; // history service not reachable: try again later
+  }
+  if (again) setTimeout(pollHeatGrid, again);
+}
+pollHeatGrid();

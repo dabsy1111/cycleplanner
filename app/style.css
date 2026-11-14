@@ -210,3 +210,4 @@ textarea { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-
 .spinner { width: 14px; height: 14px; border: 2px solid #a5d8ff; border-top-color: #1c7ed6; border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 div.opt > span { padding-left: 21px; }
+.opt small.heat-progress { color: var(--fg); margin-top: 4px; }

@@ -365,18 +365,31 @@ function brouterUrl(points, profile, stock = false, alt = 0, over = {}) {
   if ($('opt-turns').checked) url += `&profile:turn_penalty=${TURN_PENALTY}`;
   const heat = HEAT_STRENGTH[$('opt-popular').value];
   if (heat) url += `&profile:heat_strength=${heat}`;
+  // BRouter's exact search (pass 2) normally ignores where the destination is. Every road in our
+  // profiles costs at least its length (cost factor >= 1, popularity only adds), so the straight
+  // line to the target is a safe lower bound: same route, about a third less searching.
+  url += '&profile:pass2coefficient=1';
   return url;
 }
 
 // Fetch and parse a route. If our patched profile ever fails where the stock one works,
 // fall back to the stock profile and say so.
 async function brouterRoute(points, profile, signal, alt = 0, over = {}) {
+  // BRouter runs MAX_THREADS routes at once; one more and it kills the oldest after 2 s. That's
+  // the server being busy (e.g. the loop generator plus your own route), not a bad request:
+  // wait a moment and ask again rather than blaming the profile.
   const get = async (url) => {
-    const res = await fetch(url, { signal });
-    const text = await res.text();
-    if ([502, 503, 504].includes(res.status)) throw new Error('the router is still starting up (first start downloads the map data). Try again in a minute.');
-    if (!res.ok || !text.trim().startsWith('{')) { const e = new Error(text.trim().slice(0, 200) || `HTTP ${res.status}`); e.routing = true; throw e; }
-    return parseBRouter(JSON.parse(text));
+    for (let attempt = 0; ; attempt++) {
+      const res = await fetch(url, { signal });
+      const text = await res.text();
+      if ([502, 503, 504].includes(res.status)) throw new Error('the router is still starting up (first start downloads the map data). Try again in a minute.');
+      if (/killed by thread-priority-watchdog|terminated/i.test(text) && !text.trim().startsWith('{')) {
+        if (attempt < 3) { await new Promise((r) => setTimeout(r, 700 * (attempt + 1))); continue; }
+        throw new Error('the router is busy. Try again in a moment.');
+      }
+      if (!res.ok || !text.trim().startsWith('{')) { const e = new Error(text.trim().slice(0, 200) || `HTTP ${res.status}`); e.routing = true; throw e; }
+      return parseBRouter(JSON.parse(text));
+    }
   };
   if (!patchedProfilesBroken) {
     try { return await get(brouterUrl(points, profile, false, alt, over)); } catch (e) {

@@ -51,6 +51,8 @@ function buildReport() {
     loopStatus: $('loop-status')?.textContent || null,
     loopTimings: typeof loopTimings !== 'undefined' ? loopTimings : null,
     forecastMs: typeof windMs !== 'undefined' ? windMs : null,
+    forecastVia: typeof windVia !== 'undefined' ? windVia : null,
+    forecastError: typeof windError !== 'undefined' ? windError : null,
     route: null,
   };
   const ll = opt('lastLoop');

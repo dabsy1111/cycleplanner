@@ -230,7 +230,7 @@ function rideSeconds(rt) {
 function planSpeedKmh() { return flatKmh(); }
 
 async function makeThroughLoop(A, B, dir, target, profile) {
-  let len = target / 1.3; // roads are ~30% longer than straight lines
+  let len = target / stretchNow(throughStretch); // roads are ~30% longer than straight lines
   let best = null;
   const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -242,42 +242,58 @@ async function makeThroughLoop(A, B, dir, target, profile) {
     l.brg = bearing(A, l.pts[1]);
     l.through = true;
     if (!best || badness(l) < badness(best)) best = l;
+    if (l.err < 0.07) throughStretch.push(loopMeasure(l.rt) / pathLength(l.pts));
     if (l.err < 0.07 || (d === 0 && loopMeasure(l.rt) > target)) break;
     len *= target / loopMeasure(l.rt);
   }
   return best;
 }
 
+// How much longer the roads are than the circle drawn for them. Starts at 30% and learns from
+// each loop as it finishes, so later directions usually land on the distance first time.
+let loopStretch = [], throughStretch = [];
+const stretchNow = (list = loopStretch) => {
+  if (!list.length) return 1.3;
+  const s = [...list].sort((a, b) => a - b);
+  return Math.min(2.2, Math.max(1.05, s[s.length >> 1]));
+};
+
 async function makeLoop(start, brg, target, profile) {
-  let radius = target / (2 * Math.PI * 1.3); // roads are ~30% longer than the circle
+  let radius = target / (2 * Math.PI * stretchNow());
   let best = null;
   const badness = (x) => x.err * 100 + (lp('lp-noback') ? x.repeat : 0) + x.uturn / 20;
-  const consider = (c) => {
+  const tried = new Set(); // turned circles already routed (doubling back and U-turns share some)
+  const consider = (c, b) => {
     c.err = Math.abs(loopMeasure(c.rt) - target) / target;
     c.repeat = repeatShare(c.rt);
     c.uturn = uturnMetres(c.rt);
-    c.brg = brg;
+    c.brg = b;
     if (!best || badness(c) < badness(best)) best = c;
+  };
+  const turned = async (turn) => {
+    const b = (brg + turn + 360) % 360;
+    if (tried.has(b)) return;
+    tried.add(b);
+    try { consider(await routeCircle(start, b, radius, profile), b); }
+    catch { /* that variation hit the sea or similar */ }
   };
   for (let attempt = 0; attempt < 3; attempt++) {
     const c = await routeCircle(start, brg, radius, profile);
-    consider(c);
-    if (c.err < 0.07) break;
+    consider(c, brg);
+    const ratio = loopMeasure(c.rt) / (2 * Math.PI * radius);
+    if (c.err < 0.07) { loopStretch.push(ratio); break; }
     radius *= target / loopMeasure(c.rt);
   }
+  tried.add(brg);
   // Doubling back: try the circle turned a little either way.
   if (lp('lp-noback') && best.repeat > 12) {
-    for (const turn of [25, -25]) {
-      if (best.repeat <= 12) break;
-      try { consider(await routeCircle(start, (brg + turn + 360) % 360, radius, profile)); }
-      catch { /* that variation hit the sea or similar */ }
-    }
+    for (const turn of [25, -25]) { if (best.repeat > 12) await turned(turn); }
   }
-  // U-turns: try the circle turned a little each way and keep the cleanest.
+  // U-turns: try the circle turned a little each way and keep the cleanest. A short one
+  // (under 200 m) only gets the two small turns; it's not worth four more routes.
   for (const turn of [12, -12, 25, -25]) {
-    if (best.uturn === 0) break;
-    try { consider(await routeCircle(start, (brg + turn + 360) % 360, radius, profile)); }
-    catch { /* that variation hit the sea or similar */ }
+    if (best.uturn === 0 || (Math.abs(turn) === 25 && best.uturn < 200)) continue;
+    await turned(turn);
   }
   return best;
 }
@@ -403,6 +419,24 @@ function progRender() {
       `<div class="small">${secs} s</div>`);
 }
 
+// Rank, drop near-copies and long U-turns, keep the best six. Used for the list as loops come in
+// and for the final one (which may first be cut down to loops with an interval stretch).
+function shortlist(list, final = false) {
+  for (const l of list) {
+    if (l.mainPct == null) l.mainPct = mainRoadPct(l.rt);
+    if (l.newPct === undefined) l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
+    if (l.liked === undefined) l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
+  }
+  if (!final) { const close = list.filter((l) => l.err < 0.25); if (close.length) list = close; }
+  list = [...list].sort((a, b) => loopScore(a) - loopScore(b));
+  // Drop near-copies (common when every direction ends up on the same roads)...
+  const distinct = [];
+  for (const l of list) if (!distinct.some((d) => sameRoute(d.rt, l.rt))) distinct.push(l);
+  // ...and loops with long U-turns when there are enough clean ones.
+  const clean = distinct.filter((l) => l.uturn < 500);
+  return (clean.length >= 3 ? clean : distinct).slice(0, 6);
+}
+
 async function generateLoops() {
   if (loopBusy) return;
   loopBusy = true;
@@ -458,8 +492,28 @@ async function generateLoops() {
     const bearings = B ? THROUGH_DIRS : lp('lp-climb') ? [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330] : [0, 45, 90, 135, 180, 225, 270, 315];
     const found = [];
     let done = 0;
+    loopStretch = []; throughStretch = [];
     loopProg.total = bearings.length;
     progStep('Routing loops');
+    // Loops appear in the list as they're found, so you can look at (and pick) one while the rest
+    // are still being worked out. The final list is ranked once everything is in.
+    let shownOnce = false;
+    const showSoFar = () => {
+      if (!found.length) return;
+      const picked = loopResults[loopPicked];
+      loopResults = shortlist(found);
+      loopPicked = picked ? loopResults.indexOf(picked) : -1;
+      if (picked && loopPicked < 0) { loopResults.push(picked); loopPicked = loopResults.length - 1; }
+      renderLoops();
+      showLoopPreview();
+      if (!shownOnce && loopPicked < 0) {
+        shownOnce = true;
+        const b = new maplibregl.LngLatBounds();
+        const r = (B ? haversine(start, B) : tgt / (2 * Math.PI * 1.3)) * 2;
+        [0, 90, 180, 270].forEach((d) => b.extend(destination(start, d, r)));
+        map.fitBounds(b, { padding: 50 });
+      }
+    };
     const queue = [...bearings];
     const worker = async () => {
       while (queue.length) {
@@ -468,7 +522,7 @@ async function generateLoops() {
         try {
           const l = B ? await makeThroughLoop(start, B, brg, tgt, profile) : await makeLoop(start, brg, target, profile);
           if (windHere() && !loopOneWay) await windTurn(l);
-          if (l.err < 0.4 && l.rt.length > 1000) found.push(l);
+          if (l.err < 0.4 && l.rt.length > 1000) { found.push(l); showSoFar(); }
         } catch { /* usually a circle point out at sea */ }
         done++;
         loopProg.active.delete(brg);
@@ -484,16 +538,22 @@ async function generateLoops() {
         l.rt = await fetchRoute(l.pts, profile);
         if (l.through) l.bIndex = l.pts.length - 1 - l.bIndex;
         l.err = Math.abs(loopMeasure(l.rt) - tgt) / tgt;
+        delete l.mainPct; delete l.newPct; delete l.liked; // facts about the old direction
         l.wind = windStats(l.rt);
       } else l.wind = fwd;
     }
+    // BRouter runs four routes at once (MAX_THREADS) and kills the oldest if a fifth arrives:
+    // three here leaves one for your own route while you look at loops that are already in.
     await Promise.all([worker(), worker(), worker()]);
-    // Loops routed before the forecast arrived: give it a few more seconds, then turn them.
-    const late = loopOneWay ? [] : found.filter((l) => !l.wind);
+    // Loops routed before the forecast arrived: if it failed, ask once more, then turn them.
+    // (A loop you've already picked stays the way you picked it.)
+    const late = loopOneWay ? [] : found.filter((l) => !l.wind && l !== loopResults[loopPicked]);
     if (late.length) {
       if (!windHere()) {
         progStep('Waiting a moment for the wind forecast…');
-        await Promise.race([windReady, new Promise((r) => setTimeout(r, 5000))]);
+        const wait = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r('slow'), ms))]);
+        // Still on its way: give it a few seconds. Already failed: try once more.
+        if ((await wait(windReady, 5000)) === null) await wait(loadWind(start[0], start[1]).catch(() => null), 15000);
       }
       if (windHere()) {
         progStep('Turning loops to put the wind behind you on the way home…');
@@ -502,11 +562,6 @@ async function generateLoops() {
     }
 
     progStep(`Ranking ${found.length} loops…`);
-    for (const l of found) {
-      l.mainPct = mainRoadPct(l.rt);
-      l.newPct = typeof newRoadShare === 'function' ? newRoadShare(l.rt) : null;
-      l.liked = typeof likedShare === 'function' ? likedShare(l.rt) : null;
-    }
     // Prefer loops within 25% of the distance; only fall back to looser ones if that leaves too few.
     const close = found.filter((l) => l.err < 0.25);
     let list = close.length >= 3 ? close : found;
@@ -525,19 +580,17 @@ async function generateLoops() {
         if (!list.length) note = `None of the loops has an uninterrupted ${mins} min stretch. Try a shorter interval or a longer loop.`;
       } catch (e) { note = 'Could not check interval stretches: ' + e.message; list = found; }
     }
-    list.sort((a, b) => loopScore(a) - loopScore(b));
-    // Drop near-copies (common when every direction ends up on the same roads)...
-    const distinct = [];
-    for (const l of list) if (!distinct.some((d) => sameRoute(d.rt, l.rt))) distinct.push(l);
-    // ...and loops with long U-turns when there are enough clean ones.
-    const clean = distinct.filter((l) => l.uturn < 500);
-    loopResults = (clean.length >= 3 ? clean : distinct).slice(0, 6);
+    const picked = loopResults[loopPicked];
+    loopResults = shortlist(list, true);
+    loopPicked = picked ? loopResults.indexOf(picked) : -1;
     renderLoops();
     showLoopPreview();
     if (loopResults.length) {
-      const b = new maplibregl.LngLatBounds();
-      loopResults.forEach((l) => l.rt.coords.forEach((c) => b.extend([c[0], c[1]])));
-      map.fitBounds(b, { padding: 50 });
+      if (loopPicked < 0) {
+        const b = new maplibregl.LngLatBounds();
+        loopResults.forEach((l) => l.rt.coords.forEach((c) => b.extend([c[0], c[1]])));
+        map.fitBounds(b, { padding: 50 });
+      }
       st.textContent = (note ? note + ' ' : '') + `${loopResults.length} ${loopOneWay ? "routes" : "loops"}, best match first. Hover to highlight one, tap to use it.`;
     } else {
       st.textContent = note || 'No loops found. The roads around here may be mostly dead ends (hills, coast or water). Try a longer distance, or put down a second point to loop through.';

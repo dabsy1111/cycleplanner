@@ -2,6 +2,7 @@
 /* Wind: Open-Meteo hourly forecast, headwind along the route, and which way to ride a loop. */
 
 const OPEN_METEO = '/wx/forecast'; // Open-Meteo, via your server's cache
+const OPEN_METEO_DIRECT = 'https://api.open-meteo.com/v1/forecast'; // if your server can't reach it
 const COMPASS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
 const compass = (deg) => COMPASS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
 
@@ -19,6 +20,7 @@ $('wind-time').value = defaultDeparture();
 function departureMs() { const t = Date.parse($('wind-time').value); return Number.isFinite(t) ? t : Date.now(); }
 
 let windMs = null; // how long the last forecast took, for problem reports
+let windVia = null, windError = null; // which way it came and what failed, for problem reports
 async function loadWind(lng, lat) {
   const key = `${lat.toFixed(1)},${lng.toFixed(1)}`;
   if (wind && wind.key === key && Date.now() - wind.fetched < 30 * 60e3) return wind;
@@ -28,13 +30,25 @@ async function loadWind(lng, lat) {
     hourly: 'wind_speed_10m,wind_direction_10m,wind_gusts_10m,temperature_2m,apparent_temperature,precipitation_probability,uv_index,is_day',
     wind_speed_unit: 'kmh', timezone: 'auto', past_days: '1', forecast_days: '7',
   });
-  // Give up after 20 s (one retry): a hung forecast mustn't hold anything else up.
+  // Through your server first (cached, so a second look is instant). If the server can't reach
+  // Open-Meteo, the browser asks Open-Meteo itself. A hung forecast mustn't hold anything else up.
   const t0 = performance.now();
-  const p = fetch(`${OPEN_METEO}?${params}`, { signal: AbortSignal.timeout(30000) }).then((r) => {
-    windMs = Math.round(performance.now() - t0);
-    if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
-    return r.json();
+  const get = async (url, ms) => {
+    const r = await fetch(url, { signal: AbortSignal.timeout(ms) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    if (!j.hourly || !j.hourly.time) throw new Error(j.reason || 'no hourly data');
+    return j;
+  };
+  const p = get(`${OPEN_METEO}?${params}`, 15000).then((j) => { windVia = 'server'; return j; }, (e) => {
+    windError = `server: ${e.message}`;
+    return get(`${OPEN_METEO_DIRECT}?${params}`, 15000).then((j) => { windVia = 'direct'; return j; }, (e2) => {
+      windError += `; direct: ${e2.message}`;
+      throw new Error(`Weather forecast unavailable (${windError})`);
+    });
   }).then((j) => {
+    windMs = Math.round(performance.now() - t0);
+    if (windVia === 'server') windError = null;
     const off = (j.utc_offset_seconds || 0) * 1000;
     wind = {
       key, fetched: Date.now(),
@@ -44,7 +58,8 @@ async function loadWind(lng, lat) {
       rain: j.hourly.precipitation_probability, uv: j.hourly.uv_index, day: j.hourly.is_day,
     };
     return wind;
-  }).finally(() => { windPending = null; });
+  }).catch((e) => { windMs = Math.round(performance.now() - t0); throw e; })
+    .finally(() => { windPending = null; });
   windPending = { key, p };
   return p;
 }

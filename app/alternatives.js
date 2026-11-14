@@ -3,7 +3,7 @@
    only routes that are really different from yours and from each other (the Cyclops idea:
    each one should win on something, shortest, least climbing or quietest). */
 
-const ALT_PROFILES = ['fastbike', 'safety', 'trekking'];
+const ALT_PROFILES = ['fastbike', 'trekking'];
 const ALT_MAX = 3;          // shown besides the route you're on
 const ALT_OVERLAP = 0.7;    // more shared road than this counts as the same route
 let altRoutes = [];         // candidates: [{prof, idx, rt, mainPct, steep}]

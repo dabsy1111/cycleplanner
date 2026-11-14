@@ -10,18 +10,16 @@ const HEAT_MIN_Z = 5;    // the proxy has nothing useful below this
 const HEAT_MAX_Z = 14;
 const heatPrefs = {
   show: store.get('cp.heat', false),
-  activity: store.get('cp.heat.act', 'ride'),
-  color: store.get('cp.heat.col', 'auto'),
+  activity: 'ride',  // a ride planner: the same rides heatmap the routing reads
   opacity: store.get('cp.heat.op', 60),
 };
 let heatErrors = 0;      // failed tiles since the last change of settings
 let heatChecking = false;
 let heatRetry = 0;
 
-// 'auto' picks the scheme that shows the busiest roads best on the current background: on the light
-// map grey makes them the darkest lines; on the photos hot makes them glow near-white.
+// The scheme that shows the busiest roads best on the current background: on the light map grey
+// makes them the darkest lines; on the photos hot makes them glow near-white.
 function heatColor() {
-  if (heatPrefs.color !== 'auto') return heatPrefs.color;
   return $('lyr-base').value === 'map' ? 'gray' : 'hot';
 }
 
@@ -54,7 +52,7 @@ async function checkHeatServer() {
     else if (heatErrors && !s.layer_error) {
       // The proxy is back: MapLibre doesn't retry tiles that failed, so ask for them again.
       setHeatSource();
-    } else if (s.layer_error) heatStatus(`The proxy won't serve ${heatPrefs.activity}/${heatColor()}: ${s.layer_error}`);
+    } else if (s.layer_error) heatStatus(`The heatmap proxy won't serve these tiles: ${s.layer_error}`);
     else heatStatus('');
   } catch {
     heatStatus('The history service isn\'t running, and it\'s what fetches heatmap tiles.');
@@ -108,8 +106,6 @@ map.on('error', (e) => {
 
 // ---------- controls ----------
 $('heat-show').checked = heatPrefs.show;
-$('heat-activity').value = heatPrefs.activity;
-$('heat-color').value = heatPrefs.color;
 $('heat-opacity').value = heatPrefs.opacity;
 $('heat-opacity-val').textContent = `${heatPrefs.opacity}%`;
 $('heat-opts').hidden = !heatPrefs.show;
@@ -119,16 +115,6 @@ $('heat-show').onchange = (e) => {
   store.set('cp.heat', heatPrefs.show);
   applyHeat();
   if (heatPrefs.show) checkHeatServer();
-};
-$('heat-activity').onchange = (e) => {
-  heatPrefs.activity = e.target.value;
-  store.set('cp.heat.act', heatPrefs.activity);
-  setHeatSource();
-};
-$('heat-color').onchange = (e) => {
-  heatPrefs.color = e.target.value;
-  store.set('cp.heat.col', heatPrefs.color);
-  setHeatSource();
 };
 let heatOpFrame = 0;
 $('heat-opacity').addEventListener('input', () => {

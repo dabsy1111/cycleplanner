@@ -75,11 +75,9 @@ clickHandlers.push((e) => !!map.getLayer('safety-icon') && map.queryRenderedFeat
 
 function applySafetyMarks() {
   if (!map.getLayer('safety-icon')) return;
-  const on = $('safety-marks').checked;
+  const on = $('colour-by').value === 'safety'; // Map › Colour route by › road safety
   for (const id of ['safety-line', 'safety-icon']) map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
 }
-$('safety-marks').checked = store.get('cp.safety-marks', true);
-$('safety-marks').onchange = () => { store.set('cp.safety-marks', $('safety-marks').checked); applySafetyMarks(); };
 
 function renderSafety() {
   const ul = $('safety'), sum = $('safety-sum');

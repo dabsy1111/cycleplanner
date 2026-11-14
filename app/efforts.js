@@ -183,6 +183,10 @@ map.on('load', () => {
 });
 
 routeHooks.push(() => { updateEfforts(); });
-['eff-min', 'eff-terrain'].forEach((id) => $(id).addEventListener('change', updateEfforts));
-$('speed').addEventListener('change', updateEfforts);
+// Remembered, and also used by the loop generator's "Include an interval stretch". The first time,
+// the minutes come from the loop generator's old separate setting, if you'd changed it.
+$('eff-min').value = store.get('cp.eff-min', store.get('cp.lp-interval-min', $('eff-min').value));
+$('eff-terrain').value = store.get('cp.eff-terrain', $('eff-terrain').value);
+['eff-min', 'eff-terrain'].forEach((id) => $(id).addEventListener('change', () => { store.set('cp.' + id, $(id).value); updateEfforts(); }));
+$('pace-pct').addEventListener('change', updateEfforts);
 $('eff-min').closest('details').addEventListener('toggle', (e) => { if (e.target.open) updateEfforts(); });

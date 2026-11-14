@@ -41,7 +41,7 @@ function buildReport() {
     view: { center: [r5(map.getCenter().lng), r5(map.getCenter().lat)], zoom: +map.getZoom().toFixed(1) },
     profile: $('profile').value,
     options: { ...getOptions(), alternativeIndex: altIndex },
-    pace: { mode: opt('powerMode()') ? 'power' : 'speed', pctFtp: +$('pace-pct').value, speedKmh: +$('speed').value, athlete: opt('athlete') },
+    pace: { pctFtp: +$('pace-pct').value, athlete: opt('athlete') },
     departure: $('wind-time').value,
     waypoints: waypoints.map((w) => [r5(w.lng), r5(w.lat)]),
     brouterRequest: req,

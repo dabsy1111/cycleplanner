@@ -39,7 +39,7 @@ function routeRecord(saved) {
 }
 
 function loadRoute(r, fit = true) {
-  $('profile').value = r.profile === 'fastbike-lowtraffic' ? 'fastbike' : (r.profile || 'fastbike');
+  $('profile').value = r.profile === 'fastbike-lowtraffic' ? 'fastbike' : profileOrNearest(r.profile || 'fastbike');
   applyOptions(r.options);
   if (r.name) $('route-name').value = r.name;
   setWaypoints(r.wp, { fit });

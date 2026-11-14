@@ -28,17 +28,12 @@
     <ul id="results" hidden></ul>
   </div>
 
-  <div class="row">
+  <div class="row opts">
     <select id="profile" title="Routing profile">
       <option value="fastbike">Road: fastest</option>
-      <option value="safety">Safest (paths first)</option>
       <option value="trekking">Mixed / touring</option>
       <option value="gravel">Gravel</option>
     </select>
-  </div>
-
-  <div class="row small opts">
-    <label class="check"><input id="opt-footpaths" type="checkbox" checked> Avoid footpaths</label>
     <select id="opt-traffic" class="inline" title="Traffic">
       <option value="normal">Traffic: normal</option>
       <option value="avoid">Traffic: avoid busy roads</option>
@@ -57,15 +52,15 @@
     <div><b id="s-dist">–</b><small>km<span id="s-heat"></span></small></div>
     <div><b id="s-asc">–</b><small>m up<span id="s-steep" title="Steepest 200 m of the route"></span></small></div>
     <div><b id="s-time">–</b><small>
-      <span id="pace-flat">at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</span>
-      <span id="pace-power" hidden>at <input id="pace-pct" type="number" min="30" max="120" step="5" value="65">% FTP</span>
-      <button id="pace-switch" class="linkbtn" hidden title="Switch between a flat speed and your power">use FTP</button></small></div>
+      <span id="pace-power">at <input id="pace-pct" type="number" min="30" max="120" step="5" value="65">% FTP</span></small></div>
   </div>
   <div id="msg" class="row msg" hidden></div>
 
   <div class="scroll">
     <details class="sec" data-key="ropts" open>
       <summary>Route options</summary>
+      <label class="opt"><input id="opt-footpaths" type="checkbox" checked>
+        <span><b>Avoid footpaths</b><small>Keeps routes off pedestrian footpaths and pavements. Shared paths and bike paths are still used.</small></span></label>
       <label class="opt"><input id="opt-lights" type="checkbox">
         <span><b>Fewer traffic lights</b><small>Treats every set of lights as worth a 300 m detour, and stop or give way signs as 100 m. Good for training rides where stopping wrecks an effort. Routes get a little longer.</small></span></label>
       <label class="opt"><input id="opt-turns" type="checkbox">
@@ -76,7 +71,7 @@
           <option value="strong">strongly prefer</option>
         </select></b><small>Uses the ride heatmap to favour roads lots of people ride. Prefer: a road nobody rides counts as half as long again as a busy one. Strongly prefer: two and a half times. Where there's no heatmap data yet, roads count as middling.</small><small id="heat-progress" class="heat-progress" hidden></small></span></div>
       <label class="opt"><input id="opt-alts" type="checkbox">
-        <span><b>Show alternatives</b><small>Routes the same points a few different ways (fastest, safest, touring) and keeps up to three that are really different from yours: each is labelled with what it wins on: shortest, least climbing, quietest or most popular (from the ride heatmap). Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
+        <span><b>Show alternatives</b><small>Routes the same points a few different ways (road and mixed / touring, each with BRouter's own alternatives) and keeps up to three that are really different from yours: each is labelled with what it wins on: shortest, least climbing, quietest or most popular (from the ride heatmap). Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
       <ul id="alts" class="stops"></ul>
     </details>
 
@@ -108,22 +103,17 @@
         <span><b>Loop through my second point</b><small>If you've put down a second point, every loop goes from the start out to that point and back home a different way. The distance is raised if the point is too far for it.</small></span></label>
       <label class="opt sub"><input id="lp-oneway" type="checkbox">
         <span><b>Finish there (A to B)</b><small>Instead of coming home, end at your second point, taking a longer way to fill the distance or time you set.</small></span></label>
-      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, footpath, traffic and route options above, and is ridden whichever way gives a tailwind home.</p>
+      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, traffic and route options above (with "avoid busy roads", loops with less main road come first). Loops using more of your liked roads rank higher, and "snap points" uses liked roads as well as bike paths. Each loop is ridden whichever way gives a tailwind home.</p>
       <div class="loopopts">
         <label class="opt"><input id="lp-noback" type="checkbox" checked>
           <span><b>Don't double back</b><small>Rejects loops that ride the same road twice and tries again with shifted waypoints. Each loop shows how much of it repeats. (Dead-end spikes, where a loop point lands in a side street, are always trimmed off.)</small></span></label>
-        <label class="opt"><input id="lp-quiet" type="checkbox" checked>
-          <span><b>Quieter roads</b><small>Routes the loops with "avoid busy roads" on, whatever the setting above, and ranks loops with less main road first.</small></span></label>
         <label class="opt"><input id="lp-snap" type="checkbox">
           <span><b>Snap points to bike paths</b><small>Moves each loop waypoint onto the nearest bike or shared path within 600 m, so loops are built from paths instead of random suburban streets. Slower: looks up paths in OpenStreetMap first.</small></span></label>
-        <label class="opt"><input id="lp-liked" type="checkbox" checked>
-          <span><b>Favour roads I like</b><small>Ranks loops that use more of your liked roads higher, and lets "snap points" use liked roads as well as bike paths.</small></span></label>
         <label class="opt"><input id="lp-climb" type="checkbox">
           <span><b>Climbing target</b><small>Makes more loops and ranks them by how close they come to this much climbing. In Perth, bigger targets pull loops towards the hills.</small></span></label>
         <div class="row small">About <input id="lp-climb-m" type="number" min="50" max="3000" step="50" value="400"> m of climbing</div>
         <label class="opt"><input id="lp-interval" type="checkbox">
-          <span><b>Include an interval stretch</b><small>Only shows loops with at least one uninterrupted stretch this long (no lights, stop signs, roundabouts or sharp turns), and highlights it. Uses the interval stretch finder's rules.</small></span></label>
-        <div class="row small">At least <input id="lp-interval-min" type="number" min="2" max="60" step="1" value="8"> min</div>
+          <span><b>Include an interval stretch</b><small>Only shows loops with at least one uninterrupted stretch (no lights, stop signs, roundabouts or sharp turns), and highlights it. Uses the length and terrain set under More › Interval stretches: <span id="lp-interval-rule">8 min, flat</span>.</small></span></label>
         <label class="opt"><span style="width:13px"></span>
           <span><b>Roads I've ridden</b><small>Uses your intervals.icu ride history to rank loops.</small>
           <select id="lp-novelty" class="inline"><option value="off">don't mind</option><option value="new">favour new roads</option><option value="familiar">favour familiar roads</option></select></span></label>
@@ -162,19 +152,9 @@
       <div id="import-status" class="small"></div>
     </details>
 
-    <details class="sec" data-key="report">
-      <summary>Report a problem</summary>
-      <p class="hint">Builds a file with everything needed to reproduce this route exactly: points, profile, every option, no-go areas, disliked roads, how a loop was generated, and the route with its road tags. Say what's wrong, mark the spots on the map, then download it and send it to Claude.</p>
-      <textarea id="rep-notes" rows="3" placeholder="What don't you like? e.g. “goes down Canning Hwy around km 12, I'd rather take the river path”"></textarea>
-      <div class="row buttons"><button id="rep-spot">Mark a problem spot</button></div>
-      <ul id="rep-spots" class="stops"></ul>
-      <div class="row buttons"><button id="rep-download">Download report</button><button id="rep-copy">Copy report</button></div>
-      <div id="rep-status" class="small"></div>
-    </details>
-
     <details class="sec more" data-key="more">
       <summary>More</summary>
-      <p class="hint">Map background, stops, interval stretches, road safety, surface, liked roads and no-go areas.</p>
+      <p class="hint">Map background, stops, interval stretches, road safety, surface, liked and avoided roads and areas, routing data, and reporting a problem.</p>
       <details class="sec" data-key="map" open>
         <summary>Map</summary>
         <label class="check">Background
@@ -185,23 +165,8 @@
           </select></label>
         <label class="check" id="photo-paths-row" hidden><input id="lyr-photo-paths" type="checkbox" checked> Outline mapped paths on the photo <small>(blue = bike path, yellow = other path)</small></label>
         <label class="check"><input id="lyr-cyclosm" type="checkbox"> CyclOSM bike map</label>
-        <label class="check"><input id="heat-show" type="checkbox"> Popularity heatmap</label>
+        <label class="check"><input id="heat-show" type="checkbox"> Popularity heatmap <small>(rides)</small></label>
         <div id="heat-opts" hidden>
-          <div class="row small">
-            <select id="heat-activity" aria-label="Heatmap activity">
-              <option value="ride">Rides</option>
-              <option value="all">All activities</option>
-              <option value="run">Runs</option>
-            </select>
-            <select id="heat-color" aria-label="Heatmap colours">
-              <option value="auto">Auto: grey on the map, hot on photos</option>
-              <option value="hot">Hot</option>
-              <option value="blue">Blue</option>
-              <option value="purple">Purple</option>
-              <option value="gray">Grey</option>
-              <option value="bluered">Blue-red</option>
-            </select>
-          </div>
           <div class="row small">Opacity <input id="heat-opacity" type="range" min="10" max="100" step="5" value="60" class="slider"> <span id="heat-opacity-val">60%</span></div>
           <p class="hint" id="heat-status"></p>
         </div>
@@ -209,7 +174,6 @@
         <label class="check"><input id="md-rail" type="checkbox" checked> Train stations</label>
         <label class="check"><input id="md-places" type="checkbox" checked> Shops, cafés &amp; other places</label>
         <label class="check"><input id="md-streets" type="checkbox" checked> Street names</label>
-        <label class="check"><input id="lyr-poi" type="checkbox" checked> Toilets, water &amp; cafés (zoom in to see)</label>
         <div class="row small">
           Colour route by
           <select id="colour-by">
@@ -218,6 +182,7 @@
             <option value="way">way type</option>
             <option value="wind">wind (red = headwind)</option>
             <option value="new">new vs ridden roads</option>
+            <option value="safety">road safety (yellow: main road, red and ⚠: 80 km/h+)</option>
           </select>
         </div>
         <p class="hint">Tap the map to add points. Tap the route line to insert a point there, then drag it. On a finished loop, a tap adds the point to the nearest part of the loop instead of after the finish. Tap a point to remove it.</p>
@@ -225,6 +190,7 @@
 
       <details class="sec" data-key="stops">
         <summary>Toilets, water &amp; cafés along the route</summary>
+        <p class="hint">Ticked kinds show on the map (zoom in to see them) and are listed along the route.</p>
         <div class="row small">Show
           <label class="check"><input id="st-toilet" type="checkbox" checked> toilets</label>
           <label class="check"><input id="st-water" type="checkbox" checked> water</label>
@@ -255,8 +221,7 @@
 
       <details class="sec" data-key="safety">
         <summary>Road safety</summary>
-        <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it.</p>
-        <label class="check"><input id="safety-marks" type="checkbox" checked> Mark it on the map <small>(yellow band: main road; red band and ⚠ sign: highway, freeway or 80 km/h+)</small></label>
+        <p class="hint">Stretches on main roads (primary, secondary, trunk) or roads signed 80 km/h or more, as mapped in OpenStreetMap. Tap one to see it. To mark them on the map, set Map › Colour route by to "road safety".</p>
       <div id="safety-sum" class="small"></div>
         <ul id="safety" class="stops"></ul>
       </details>
@@ -269,21 +234,16 @@
       </details>
 
       <details class="sec" data-key="roads">
-        <summary>Roads I like &amp; dislike</summary>
-        <p class="hint">Tap a button, then tap a road on the map. It marks that road up to about 2 km either way. Disliked roads are avoided unless the way around is much longer (a 200 m detour round Roe Street: avoided; a 7 km detour round the Narrows: still used). Liked roads can't pull the router onto them, but the loop generator favours them and snaps loop points onto them, and you'll see how much of each route uses them.</p>
-        <div class="row buttons"><button id="road-like">Mark a road I like</button><button id="road-dislike">Mark a road I dislike</button></div>
-        <div id="road-sum" class="small"></div>
-        <ul id="roads" class="stops"></ul>
-      </details>
-
-      <details class="sec" data-key="nogo">
-        <summary>No-go areas</summary>
-        <p class="hint">Circles the router stays out of, like a nasty intersection or a road you hate. "Avoid completely" never enters; "prefer to avoid" goes around unless the detour is more than about ten times the distance inside the circle. Saved on the server, so they apply on every device.</p>
+        <summary>Roads I like &amp; places to avoid</summary>
+        <p class="hint">Tap a button, then tap the map. A road is marked up to about 2 km either way from where you tap.</p>
+        <p class="hint">Avoided roads are dodged unless the way around is much longer (a 200 m detour round Roe Street: avoided; a 7 km detour round the Narrows: still used). Avoided areas are circles: "avoid completely" never enters; "prefer to avoid" goes around unless the detour is more than about ten times the distance inside. Liked roads can't pull the router onto them, but the loop generator favours them and you'll see how much of each route uses them. All of these are saved on the server, so they apply on every device.</p>
+        <div class="row buttons"><button id="road-like">Like a road</button><button id="road-dislike">Avoid a road</button><button id="nogo-add">Avoid an area</button></div>
         <div class="row small">
-          Size <select id="nogo-radius" class="inline"><option value="60">small (60 m)</option><option value="150" selected>medium (150 m)</option><option value="400">large (400 m)</option></select>
+          Area size <select id="nogo-radius" class="inline"><option value="60">small (60 m)</option><option value="150" selected>medium (150 m)</option><option value="400">large (400 m)</option></select>
           <select id="nogo-mode" class="inline"><option value="hard">avoid completely</option><option value="soft">prefer to avoid</option></select>
         </div>
-        <div class="row buttons"><button id="nogo-add">Add area: tap the map</button></div>
+        <div id="road-sum" class="small"></div>
+        <ul id="roads" class="stops"></ul>
         <ul id="nogos" class="stops"></ul>
       </details>
 
@@ -297,6 +257,15 @@
         <div id="region-note" class="small"></div>
         <ul id="regions" class="stops"></ul>
       </details>
+      <details class="sec" data-key="report">
+        <summary>Report a problem</summary>
+        <p class="hint">Builds a file with everything needed to reproduce this route exactly: points, profile, every option, no-go areas, disliked roads, how a loop was generated, and the route with its road tags. Say what's wrong, mark the spots on the map, then download it and send it to Claude.</p>
+        <textarea id="rep-notes" rows="3" placeholder="What don't you like? e.g. “goes down Canning Hwy around km 12, I'd rather take the river path”"></textarea>
+        <div class="row buttons"><button id="rep-spot">Mark a problem spot</button></div>
+        <ul id="rep-spots" class="stops"></ul>
+        <div class="row buttons"><button id="rep-download">Download report</button><button id="rep-copy">Copy report</button></div>
+        <div id="rep-status" class="small"></div>
+      </details>
     </details>
 
   </div>
@@ -304,6 +273,7 @@
 
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="app.js"></script>
+<script src="pace.js"></script>
 <script src="wind.js"></script>
 <script src="efforts.js"></script>
 <script src="loops.js"></script>
@@ -316,7 +286,6 @@
 <script src="safety.js"></script>
 <script src="alternatives.js"></script>
 <script src="regions.js"></script>
-<script src="pace.js"></script>
 <script src="roads.js"></script>
 <script src="gpximport.js"></script>
 <script src="report.js"></script>

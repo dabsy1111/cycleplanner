@@ -287,6 +287,6 @@ colourers.wind = (rt) => {
 
 routeHooks.push(() => { refreshWind(); });
 $('wind-time').addEventListener('change', refreshWind);
-$('speed').addEventListener('change', refreshWind);
+$('pace-pct').addEventListener('change', refreshWind);
 $('wind-reverse').onclick = () => setWaypoints([...waypoints].reverse());
 map.on('load', refreshWind);

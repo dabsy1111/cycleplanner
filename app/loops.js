@@ -8,8 +8,9 @@ let lastLoop = null; // how the current route was generated, for problem reports
 let loopBusy = false;
 
 const lp = (id) => $(id).checked;
-const loopOver = () => (lp('lp-quiet') ? { traffic: 'avoid' } : {});
-function fetchRoute(points, profile) { return brouterRoute(points, profile, undefined, 0, loopOver()); }
+// Loops use the same traffic setting as everything else (the one next to the profile).
+const quietLoops = () => $('opt-traffic').value === 'avoid';
+function fetchRoute(points, profile) { return brouterRoute(points, profile, undefined, 0, {}); }
 
 function circlePoints(start, brg, radius) {
   const centre = destination(start, brg, radius);
@@ -225,11 +226,8 @@ function rideSeconds(rt) {
   return m ? m.hours * 3600 : rt.length / (planSpeedKmh() / 3.6);
 }
 // Speed for turning a time into a starting distance: your FTP % on the flat (a little off for
-// junctions and the odd hill), or the speed you set. Loops are then sized on their real modelled time.
-function planSpeedKmh() {
-  if (typeof powerMode === 'function' && powerMode()) return speedFor(pacePower(), 0, 0, athlete.weight + BIKE_KG) * 3.6 * 0.92;
-  return Math.max(5, +$('speed').value || 27);
-}
+// junctions and the odd hill). Loops are then sized on their real modelled time.
+function planSpeedKmh() { return flatKmh(); }
 
 async function makeThroughLoop(A, B, dir, target, profile) {
   let len = target / 1.3; // roads are ~30% longer than straight lines
@@ -293,7 +291,7 @@ function mainRoadPct(rt) {
 // ---------- ranking ----------
 function loopScore(l) {
   let s = l.err * 100;
-  if (lp('lp-quiet')) s += l.mainPct * 0.3;
+  if (quietLoops()) s += l.mainPct * 0.3;
   if (lp('lp-noback')) s += l.repeat * 0.5;
   s += l.uturn / 20; // every 100 m of U-turn costs as much as 5% off the target distance
   if (lp('lp-climb')) { const t = +$('lp-climb-m').value || 400; s += (Math.abs(l.rt.ascend - t) / t) * 40; }
@@ -301,7 +299,7 @@ function loopScore(l) {
   if (nov !== 'off' && l.newPct != null) s += (nov === 'new' ? -1 : 1) * l.newPct * 0.3;
   if (l.wind) s += l.wind.second * 0.5;
   if (l.interval) s -= Math.min(l.interval.mins, 30) * 0.5;
-  if (lp('lp-liked') && l.liked) s -= l.liked.pct * 0.3;
+  if (l.liked) s -= l.liked.pct * 0.3; // more of your liked roads ranks higher
   return s;
 }
 
@@ -355,14 +353,14 @@ function renderLoops() {
       renderLoops();
       showLoopPreview();
       $('loop-status').textContent = 'Tap another loop to swap. Generate again for new ones.';
-      if (lp('lp-quiet') && $('opt-traffic').value !== 'avoid') { $('opt-traffic').value = 'avoid'; store.set('cp.traffic', 'avoid'); }
       const last = l.pts.length - 1;
       // The point you chose to loop through stays exactly where you put it.
       setWaypoints(l.pts.map(([lng, lat], i) => (i > 0 && i < last && !(l.through && i === l.bIndex) ? { lng, lat, auto: true } : { lng, lat })), { fit: true });
       lastLoop = {
         targetKm: +$('loop-km').value, targetTime: loopMode === 'time' ? $('loop-hrs').value : null, oneWay: loopOneWay, heading: compass(l.brg), bearing: l.brg, rank: k + 1,
-        switches: Object.fromEntries(['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through'].map((id) => [id, lp(id)])),
-        climbTarget: +$('lp-climb-m').value, intervalMin: +$('lp-interval-min').value, novelty: $('lp-novelty').value,
+        switches: Object.fromEntries(['lp-noback', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-through'].map((id) => [id, lp(id)])),
+        traffic: $('opt-traffic').value,
+        climbTarget: +$('lp-climb-m').value, intervalMin: +$('eff-min').value, intervalTerrain: $('eff-terrain').value, novelty: $('lp-novelty').value,
         stats: { km: +fmtKm(l.rt.length), up: Math.round(l.rt.ascend), mainPct: Math.round(l.mainPct), repeatPct: Math.round(l.repeat), uturnM: l.uturn, newPct: l.newPct == null ? null : Math.round(l.newPct) },
         waypoints: l.pts,
       };
@@ -439,7 +437,7 @@ async function generateLoops() {
       st.textContent = '';
       progStep('Looking up bike paths to snap to…');
       try { await loadPathIndex(start, target / (2 * Math.PI)); } catch { pathIndex = { key: '', cells: new Map() }; }
-      if (lp('lp-liked')) addLikedToPathIndex();
+      addLikedToPathIndex(); // liked roads count as paths to snap to
     }
     let note = '';
     // With a second point and "through my point" on, every loop goes out to that point and back another way.
@@ -515,12 +513,12 @@ async function generateLoops() {
     if (list.length && close.length < 3 && found.length > close.length) note = (note ? note + ' ' : '') + 'Few loops fit that distance here, so some are further off it.';
     if (lp('lp-interval') && found.length) {
       progStep('Checking lights and crossings for interval stretches…');
-      const mins = +$('lp-interval-min').value || 8;
+      const mins = +$('eff-min').value || 8, terrain = $('eff-terrain').value; // one setting, under Interval stretches
       try {
         // One lookup covering every loop.
         const nodes = await routeNodes({ coords: found.flatMap((l) => l.rt.coords.filter((_, i) => i % 10 === 0)) });
         for (const l of found) {
-          const s = findStretches(l.rt, interruptions(l.rt, nodes), mins * 60 * riderSpeedMs(), 'any')[0];
+          const s = findStretches(l.rt, interruptions(l.rt, nodes), mins * 60 * riderSpeedMs(), terrain)[0];
           if (s) l.interval = { ...s, mins: Math.round(s.len / riderSpeedMs() / 60) };
         }
         list = found.filter((l) => l.interval);
@@ -592,11 +590,11 @@ map.on('load', () => {
 });
 
 // Remember the loop switches.
-for (const id of ['lp-noback', 'lp-quiet', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-liked', 'lp-through', 'lp-oneway']) {
+for (const id of ['lp-noback', 'lp-snap', 'lp-climb', 'lp-interval', 'lp-through', 'lp-oneway']) {
   $(id).checked = store.get('cp.' + id, $(id).checked);
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).checked));
 }
-for (const id of ['lp-climb-m', 'lp-interval-min', 'lp-novelty']) {
+for (const id of ['lp-climb-m', 'lp-novelty']) {
   $(id).value = store.get('cp.' + id, $(id).value);
   $(id).addEventListener('change', () => store.set('cp.' + id, $(id).value));
 }
@@ -605,6 +603,13 @@ $('loop-hrs').value = store.get('cp.loophrs', '');
 updateLoopTime();
 $('loop-km').addEventListener('input', () => { loopMode = 'km'; store.set('cp.loopmode', 'km'); updateLoopTime(); });
 $('loop-hrs').addEventListener('input', () => { loopMode = 'time'; store.set('cp.loopmode', 'time'); store.set('cp.loophrs', $('loop-hrs').value); updateLoopTime(); });
-$('speed').addEventListener('input', updateLoopTime);
-$('speed').addEventListener('change', updateLoopTime); // also fired when the FTP % changes
+$('pace-pct').addEventListener('change', updateLoopTime); // also fired once your FTP arrives
 $('loop-go').onclick = generateLoops;
+
+// The interval switch uses the length and terrain set under Interval stretches: say what they are.
+function renderIntervalRule() {
+  const t = { flat: 'flat', any: 'any terrain', climb: 'climbs' }[$('eff-terrain').value] || $('eff-terrain').value;
+  $('lp-interval-rule').textContent = `at least ${+$('eff-min').value || 8} min, ${t}`;
+}
+['eff-min', 'eff-terrain'].forEach((id) => $(id).addEventListener('change', renderIntervalRule));
+renderIntervalRule();

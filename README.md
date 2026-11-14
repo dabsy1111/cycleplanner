@@ -32,7 +32,7 @@ The web port is `8095`; change the left side of `8095:80` if that clashes with s
 
 ## Popularity heatmap
 
-**More › Map › Popularity heatmap** draws heatmap tiles from a proxy you run, with a choice of activity, colours and opacity. It sits over the map and photos but under street names, your ride history and the route.
+**More › Map › Popularity heatmap** draws the rides heatmap from a proxy you run, with an opacity slider. Colours follow the background: grey on the map (busiest roads darkest), hot on the aerial and satellite photos (busiest roads brightest). It sits over the map and photos but under street names, your ride history and the route.
 
 The browser never talks to the proxy. The history service fetches tiles (2 at a time, `HEATMAP_GAP` apart), keeps them in `data/heat/tiles` for `HEATMAP_DAYS`, and nginx serves them from the app's own address at `/tiles/heat/...`. So there's no CORS to set up, the proxy only has to be reachable from the server, and tiles you've looked at keep showing if the proxy goes down.
 
@@ -56,21 +56,21 @@ The `history` service pulls GPS tracks of your outdoor rides from intervals.icu 
 
 ## Routing options
 
-The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `cp-safety`, `cp-trekking`, `cp-gravel`, built into the image by `docker/patch-profile.awk`). They add one setting, `avoid_footpaths`: footways, pedestrian areas and foot-only paths that aren't signed for bikes cost at least 6× as much, so they're only used as short links where nothing else goes through. WA allows footpath riding, so many ordinary footpaths are tagged `bicycle=yes` and the stock profiles happily use them.
+The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `cp-trekking`, `cp-gravel`; `cp-safety` is still built but the planner no longer offers it, built into the image by `docker/patch-profile.awk`). They add one setting, `avoid_footpaths`: footways, pedestrian areas and foot-only paths that aren't signed for bikes cost at least 6× as much, so they're only used as short links where nothing else goes through. WA allows footpath riding, so many ordinary footpaths are tagged `bicycle=yes` and the stock profiles happily use them.
 
 "Avoid busy roads" sets each profile's own traffic option per request. If a patched profile ever fails to load, the app falls back to the stock one and says so.
 
-Two more switches live in **Route options**: "fewer traffic lights" (each light counts as a 300 m detour, stop/give way 100 m) and "fewer turns" (60 m per turn). Both are extra settings in the patched profiles (`signal_penalty`, `turn_penalty`).
+**Route options** also holds "avoid footpaths", and two more switches: "fewer traffic lights" (each light counts as a 300 m detour, stop/give way 100 m) and "fewer turns" (60 m per turn). Both are extra settings in the patched profiles (`signal_penalty`, `turn_penalty`).
 
-**No-go areas** are BRouter `nogos` circles. "Avoid completely" never enters; "prefer to avoid" uses a weight of 10 (cost per metre ridden inside). They're stored on the server in `data/settings.json`.
+**Areas to avoid** (More › Roads I like & places to avoid) are BRouter `nogos` circles. "Avoid completely" never enters; "prefer to avoid" uses a weight of 10 (cost per metre ridden inside). They're stored on the server in `data/settings.json`.
 
 ## Ride time from your power
 
-With the history service connected, the app reads your ride FTP and weight from intervals.icu and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). Tap "use speed" to go back to a flat km/h.
+The app reads your ride FTP and weight from intervals.icu (through the history service) and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). There's no flat-speed option. If intervals.icu can't be reached it assumes 200 W FTP and 75 kg, and says so when you hover the % FTP box. Anything that needs one speed (wind timing, interval stretch lengths, sizing loops by time) uses your % of FTP on the flat.
 
-## Roads you like and dislike
+## Roads you like and places to avoid
 
-Tap "Mark a road I dislike" (or like), then tap the road on the map; the road is followed up to about 2 km each way. Disliked roads go to BRouter as a chain of small soft no-go circles, so they're avoided unless the way round is much longer. Liked roads are favoured by the loop generator (ranking and snapping). Stored on the server in `data/settings.json`.
+One section under More holds liked roads, avoided roads and avoided areas. Tap "Avoid a road" (or "Like a road"), then tap the road on the map; the road is followed up to about 2 km each way. Disliked roads go to BRouter as a chain of small soft no-go circles, so they're avoided unless the way round is much longer. Liked roads are always favoured by the loop generator (ranking, and snapping when that's on). Stored on the server in `data/settings.json`.
 
 ## GPX import
 
@@ -95,15 +95,15 @@ Tailscale is the easiest way. `tailscale serve --bg 8090` on the server also giv
 ## What it does
 
 - Tap to add points, drag to move, tap the route line to insert a point, tap a point to remove it
-- Profiles: road fastest, road low traffic, safest, mixed/touring, gravel
-- Distance, climbing, ride time at your own speed, elevation profile
-- Surface and way-type breakdown, route colouring by either
-- Toilets and drinking water from OpenStreetMap (nothing inside shopping centres, indoor or customers-only), listed along the route with gap warnings
+- Profiles: road fastest, mixed/touring, gravel; traffic normal or avoid busy roads
+- Distance, climbing, ride time from your FTP, elevation profile
+- Surface and way-type breakdown, route colouring by surface, way type, wind, new roads or road safety
+- Toilets, drinking water and cafés from OpenStreetMap (tick which kinds to show; they're shown on the map and listed) (nothing inside shopping centres, indoor or customers-only), listed along the route with gap warnings
 - GPX download with toilets and water as waypoints, routes saved in the browser, shareable links
 - Place search, CyclOSM overlay, bottom-sheet layout on phones
 - Wind: hourly forecast for your departure time, headwind/tailwind along the route, route colouring by wind, and a "ride it the other way" suggestion for loops
-- Interval stretches: the longest parts of the route with no lights, stop/give way, roundabouts, barriers, sharp turns or path crossings, filtered by minimum minutes and flat/climb
-- Loop generator: six loops of your chosen distance in different directions, each ridden the way that puts the wind behind you home, with climbing, main-road share and how much is new to you
+- Interval stretches: the longest parts of the route with no lights, stop/give way, roundabouts, barriers, sharp turns or path crossings, filtered by minimum minutes and flat/climb. The loop generator's "include an interval stretch" uses the same minutes and terrain
+- Loop generator: six loops of your chosen distance or ride time in different directions, following the main traffic setting, each ridden the way that puts the wind behind you home, with climbing, main-road share and how much is new to you
 - Ride history: your intervals.icu rides on the map, "% new roads" for any route, and route colouring by new vs ridden
 
 ## Repo layout

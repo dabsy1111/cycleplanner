@@ -58,9 +58,10 @@ async function loadNogos() {
 }
 
 function setPlacing(on) {
+  if (on && typeof markingKind !== 'undefined' && markingKind) setMarking(null); // one thing at a time
   placingNogo = on;
   document.body.classList.toggle('placing', on);
-  $('nogo-add').textContent = on ? 'Tap the map to place it (tap here to cancel)' : 'Add area: tap the map';
+  $('nogo-add').textContent = on ? 'Tap the map (tap here to cancel)' : 'Avoid an area';
 }
 
 const nogoClick = (e) => {

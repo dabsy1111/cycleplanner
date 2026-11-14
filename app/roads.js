@@ -163,7 +163,7 @@ function renderRoads() {
   ul.innerHTML = '';
   markedRoads.forEach((r, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span>${escapeHtml(r.name)}</span><span class="badge ${r.kind}">${r.kind === 'like' ? 'like' : 'dislike'}</span><button class="x" title="Delete">✕</button>`;
+    li.innerHTML = `<span>${escapeHtml(r.name)}</span><span class="badge ${r.kind}">${r.kind === 'like' ? 'liked' : 'avoid'}</span><button class="x" title="Delete">✕</button>`;
     li.querySelector('span').onclick = () => {
       const b = new maplibregl.LngLatBounds();
       r.line.forEach((p) => b.extend(p));
@@ -192,10 +192,11 @@ async function saveRoads() {
 }
 
 function setMarking(kind) {
+  if (kind && typeof placingNogo !== 'undefined' && placingNogo) setPlacing(false); // one thing at a time
   markingKind = markingKind === kind ? null : kind;
   document.body.classList.toggle('placing', !!markingKind);
-  $('road-like').textContent = markingKind === 'like' ? 'Tap a road (tap here to cancel)' : 'Mark a road I like';
-  $('road-dislike').textContent = markingKind === 'dislike' ? 'Tap a road (tap here to cancel)' : 'Mark a road I dislike';
+  $('road-like').textContent = markingKind === 'like' ? 'Tap a road (tap here to cancel)' : 'Like a road';
+  $('road-dislike').textContent = markingKind === 'dislike' ? 'Tap a road (tap here to cancel)' : 'Avoid a road';
 }
 
 const roadClick = (e) => {

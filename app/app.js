@@ -460,7 +460,8 @@ function parseBRouter(gj) {
 function routeFeatures() {
   if (!route) return emptyFC();
   const mode = $('colour-by').value;
-  if (mode === 'none') {
+  // 'safety' keeps the plain line: the road-safety bands and ⚠ signs are drawn alongside it (safety.js).
+  if (mode === 'none' || mode === 'safety') {
     return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: route.coords } }] };
   }
   if (colourers[mode]) {
@@ -504,7 +505,7 @@ function fitRoute() {
 }
 
 let modelAvgKmh = null; // average speed from the power model (pace.js), when it's in use
-function speedKmh() { return modelAvgKmh || Math.max(5, +$('speed').value || 27); }
+function speedKmh() { return modelAvgKmh || flatKmh(); }
 
 // Steepest stretch of a fixed length. Grades between single points are mostly elevation noise.
 function steepest(rt, win = 200) {
@@ -710,8 +711,12 @@ function ensurePois(s, w, n, e) {
   return poiBusy;
 }
 
+// Toilets, water and cafés: the ticks under "Toilets, water & cafés along the route" decide which
+// kinds show, both on the map and in the list. With all three off nothing is looked up.
+function anyPoiShown() { return POI_KINDS.some(kindShown); }
+
 function loadViewportPois() {
-  if (!$('lyr-poi').checked || map.getZoom() < POI_MIN_ZOOM) return;
+  if (!anyPoiShown() || map.getZoom() < POI_MIN_ZOOM) return;
   const b = map.getBounds();
   ensurePois(b.getSouth(), b.getWest(), b.getNorth(), b.getEast());
 }
@@ -751,7 +756,7 @@ function showPoiPopup(p) {
 async function updateStops() {
   stopsOnRoute = [];
   renderStops();
-  if (!route || !$('lyr-poi').checked) return;
+  if (!route || !anyPoiShown()) return;
   const seq = routeSeq;
   let s = Infinity, w = Infinity, n = -Infinity, e = -Infinity;
   for (const c of route.coords) { s = Math.min(s, c[1]); n = Math.max(n, c[1]); w = Math.min(w, c[0]); e = Math.max(e, c[0]); }
@@ -806,7 +811,7 @@ function renderStops() {
   ul.innerHTML = '';
   gapsEl.innerHTML = '';
   if (!route) return;
-  if (!$('lyr-poi').checked) { gapsEl.innerHTML = '<div class="small">Turn on “Toilets, water &amp; cafés” under Map.</div>'; return; }
+  if (!anyPoiShown()) return;
   const total = route.length / 1000;
   const limit = +$('gap-km').value || 25;
   const water = gapsFor(stopsOnRoute.filter((s) => s.poi.hasWater).map((s) => s.km), total, limit);
@@ -894,10 +899,15 @@ function writeHash() {
   const h = w ? `#p=${encodeURIComponent($('profile').value)}&w=${w}` : '';
   window.history.replaceState(null, '', location.pathname + location.search + h);
 }
+// The Safest profile was removed; anything saved or linked with it opens as Mixed / touring, the
+// nearest thing (it also leans towards paths).
+function profileOrNearest(p) { return p === 'safety' ? 'trekking' : p; }
+
 function readHash() {
   const params = new URLSearchParams(location.hash.slice(1));
   let prof = params.get('p');
   if (prof === 'fastbike-lowtraffic') { prof = 'fastbike'; $('opt-traffic').value = 'avoid'; }
+  prof = profileOrNearest(prof);
   if (prof && [...$('profile').options].some((o) => o.value === prof)) $('profile').value = prof;
   const w = params.get('w');
   if (!w) return null;
@@ -933,8 +943,11 @@ $('opt-footpaths').onchange = () => { store.set('cp.footpaths', $('opt-footpaths
 $('opt-traffic').onchange = () => { store.set('cp.traffic', $('opt-traffic').value); requestRoute(false); };
 $('opt-popular').onchange = () => { store.set('cp.popular', $('opt-popular').value); requestRoute(false); };
 $('profile').onchange = () => { store.set('cp.profile', $('profile').value); writeHash(); requestRoute(false); };
-$('speed').oninput = () => { store.set('cp.speed', $('speed').value); renderStats(); };
-$('colour-by').onchange = () => { store.set('cp.colour', $('colour-by').value); if (map.getSource('route')) map.getSource('route').setData(routeFeatures()); };
+$('colour-by').onchange = () => {
+  store.set('cp.colour', $('colour-by').value);
+  if (map.getSource('route')) map.getSource('route').setData(routeFeatures());
+  if (typeof applySafetyMarks === 'function') applySafetyMarks();
+};
 function applyBase() {
   const b = $('lyr-base').value;
   map.setLayoutProperty('aerial', 'visibility', b === 'aerial' ? 'visible' : 'none');
@@ -972,12 +985,6 @@ map.addControl({
 }, 'top-right');
 $('lyr-photo-paths').onchange = () => { store.set('cp.photo-paths', $('lyr-photo-paths').checked); applyBase(); };
 $('lyr-cyclosm').onchange = (e) => { store.set('cp.cyclosm', e.target.checked); map.setLayoutProperty('cyclosm', 'visibility', e.target.checked ? 'visible' : 'none'); };
-$('lyr-poi').onchange = (e) => {
-  store.set('cp.poi', e.target.checked);
-  map.setLayoutProperty('pois', 'visibility', e.target.checked ? 'visible' : 'none');
-  if (e.target.checked) loadViewportPois();
-  updateStops();
-};
 $('poi-radius').onchange = updateStops;
 $('gap-km').onchange = renderStops;
 $('handle').onclick = () => { $('panel').classList.toggle('collapsed'); setTimeout(() => drawElevation(), 250); };
@@ -991,14 +998,15 @@ const baseFilters = {};
 function applyMapDetails() {
   const d = {};
   for (const k of Object.keys(MAP_DETAILS)) { d[k] = $('md-' + k).checked; store.set('cp.md.' + k, d[k]); }
-  const hidden = [];
+  const hidden = ['cafe']; // cafés are drawn by our own toilets/water/cafés layer (tickable), not twice
   if (!d.bus) hidden.push('bus');
   if (!d.rail) hidden.push('rail', 'railway');
   for (const id of POI_LAYERS) {
     if (!map.getLayer(id)) continue;
     if (!(id in baseFilters)) baseFilters[id] = map.getFilter(id);
     const parts = [baseFilters[id]].filter(Boolean);
-    if (hidden.length) parts.push(['!', ['match', ['get', 'class'], hidden, true, false]]);
+    if (id !== 'poi_transit') parts.push(['!', ['match', ['get', 'class'], hidden, true, false]]);
+    else if (hidden.length > 1) parts.push(['!', ['match', ['get', 'class'], hidden.slice(1), true, false]]);
     // Shops/cafés etc. live in the ranked layers; keep stations there if wanted.
     if (id !== 'poi_transit' && !d.places) {
       const keep = [...(d.bus ? ['bus'] : []), ...(d.rail ? ['rail', 'railway'] : [])];
@@ -1013,7 +1021,12 @@ for (const k of Object.keys(MAP_DETAILS)) $('md-' + k).addEventListener('change'
 function restoreSettings() {
   for (const k of POI_KINDS) {
     $('st-' + k).checked = store.get('cp.st.' + k, true);
-    $('st-' + k).addEventListener('change', () => { store.set('cp.st.' + k, $('st-' + k).checked); applyPoiFilter(); renderStops(); drawElevation(); });
+    $('st-' + k).addEventListener('change', () => {
+      store.set('cp.st.' + k, $('st-' + k).checked);
+      applyPoiFilter();
+      loadViewportPois();
+      if (stopsOnRoute.length) { renderStops(); drawElevation(); } else updateStops(); // nothing looked up yet: look now
+    });
   }
   applyPoiFilter();
   $('gpx-wpt').checked = store.get('cp.gpxwpt', false);
@@ -1031,18 +1044,14 @@ function restoreSettings() {
       if (d.open && d.dataset.key === 'elev') drawElevation();
     });
   });
-  $('profile').value = store.get('cp.profile', 'fastbike');
+  $('profile').value = profileOrNearest(store.get('cp.profile', 'fastbike'));
   if (!$('profile').value) $('profile').value = 'fastbike';
-  $('speed').value = store.get('cp.speed', 27);
-  $('colour-by').value = store.get('cp.colour', 'none');
+  $('colour-by').value = store.get('cp.colour', store.get('cp.safety-marks', true) ? 'safety' : 'none');
   $('lyr-base').value = store.get('cp.base', 'map');
   $('lyr-photo-paths').checked = store.get('cp.photo-paths', true);
   applyBase();
   const cyc = store.get('cp.cyclosm', false);
   $('lyr-cyclosm').checked = cyc;
   map.setLayoutProperty('cyclosm', 'visibility', cyc ? 'visible' : 'none');
-  const poi = store.get('cp.poi', true);
-  $('lyr-poi').checked = poi;
-  map.setLayoutProperty('pois', 'visibility', poi ? 'visible' : 'none');
   drawElevation();
 }

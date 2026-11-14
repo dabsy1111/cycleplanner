@@ -4,10 +4,15 @@
 
 const BIKE_KG = 9, CDA = 0.32, CRR = 0.0045, RHO = 1.2, DRIVETRAIN = 0.97, G = 9.81;
 const MAX_DESCENT_KMH = 50; // you brake on the way down
-let athlete = null;          // {ftp, weight}
+// Until intervals.icu answers (or if it can't), assume a typical rider so times still make sense.
+const DEFAULT_ATHLETE = { ftp: 200, weight: 75, assumed: true };
+let athlete = DEFAULT_ATHLETE; // {ftp, weight}
 
-function pacePower() { return athlete ? (athlete.ftp * (+$('pace-pct').value || 65)) / 100 : null; }
-function powerMode() { return !!athlete && store.get('cp.pacemode', 'power') === 'power'; }
+function pacePower() { return (athlete.ftp * (+$('pace-pct').value || 65)) / 100; }
+function powerMode() { return true; } // ride time always comes from power now (kept for older callers)
+// Steady speed on flat, still air at your % of FTP, less a little for junctions and the odd hill.
+// Used wherever a single speed is needed before a route's own modelled time is known.
+function flatKmh() { return speedFor(pacePower(), 0, 0, athlete.weight + BIKE_KG) * 3.6 * 0.92; }
 
 // Speed (m/s) holding power P on gradient `grade` (fraction) into headwind `wind` (m/s, negative = tailwind).
 function speedFor(P, grade, wind, mass) {
@@ -24,7 +29,7 @@ function speedFor(P, grade, wind, mass) {
 }
 
 function modelRide(rt) {
-  if (!powerMode() || !rt || rt.coords[0].length < 3) return null;
+  if (!rt || rt.coords[0].length < 3) return null;
   const P = pacePower(), mass = athlete.weight + BIKE_KG;
   const dep = typeof departureMs === 'function' ? departureMs() : Date.now();
   const r = Math.PI / 180;
@@ -44,25 +49,19 @@ function modelRide(rt) {
 }
 
 function renderPaceUi() {
-  const on = powerMode();
-  $('pace-flat').hidden = on;
-  $('pace-power').hidden = !on;
-  $('pace-switch').hidden = !athlete;
-  $('pace-switch').textContent = on ? 'use speed' : 'use FTP';
-  if (athlete) {
-    $('pace-power').title = `${Math.round(pacePower())} W of your ${athlete.ftp} W FTP, ${athlete.weight} kg + ${BIKE_KG} kg bike`;
-  }
+  $('pace-power').title = athlete.assumed
+    ? `intervals.icu isn't connected, so this assumes ${athlete.ftp} W FTP and ${athlete.weight} kg: ${Math.round(pacePower())} W, about ${Math.round(flatKmh())} km/h on the flat`
+    : `${Math.round(pacePower())} W of your ${athlete.ftp} W FTP, ${athlete.weight} kg + ${BIKE_KG} kg bike: about ${Math.round(flatKmh())} km/h on the flat`;
 }
 
 function paceChanged() {
   renderPaceUi();
   renderStats();
-  $('speed').dispatchEvent(new Event('change')); // wind, interval stretches and loops follow the new speed
+  $('pace-pct').dispatchEvent(new Event('change')); // wind, interval stretches and loops follow the new pace
 }
 
 $('pace-pct').value = store.get('cp.pacepct', 65);
 $('pace-pct').addEventListener('input', () => { store.set('cp.pacepct', +$('pace-pct').value); paceChanged(); });
-$('pace-switch').onclick = () => { store.set('cp.pacemode', powerMode() ? 'speed' : 'power'); paceChanged(); };
 routeHooks.push(() => renderStats()); // re-run once the wind forecast for this route has loaded
 
 (async () => {
@@ -71,7 +70,6 @@ routeHooks.push(() => renderStats()); // re-run once the wind forecast for this 
     if (!res.ok) throw new Error();
     const a = await res.json();
     if (a && a.ftp && a.weight) athlete = a;
-  } catch { athlete = null; }
-  renderPaceUi();
-  if (athlete) renderStats();
+  } catch { /* keep the assumed rider */ }
+  paceChanged();
 })();

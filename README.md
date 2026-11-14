@@ -37,7 +37,13 @@ The browser never talks to the proxy. The history service fetches tiles (2 at a 
 
 The compose file points at `http://host.docker.internal:9999/...`, which is the server itself. The proxy has to accept connections from outside itself: `sudo ss -ltnp | grep 9999` should show `0.0.0.0:9999`, `*:9999` or `[::]:9999`. If it shows `127.0.0.1:9999`, containers can't reach it. A proxy running in Docker with `ports: - 9999:...` is fine. If it runs on another machine, put that machine's address in `HEATMAP_URL` instead.
 
-The routing doesn't use the heatmap yet; this is display only.
+### Popular routes
+
+The routing itself doesn't use the heatmap yet. Instead each route gets a popularity figure: the share of it on roads the **ride** heatmap shows as popular, shown under the distance ("· 62% popular") and on each alternative. The alternatives also try to include the most popular way, and label it.
+
+How it works: every heatmap colour scheme carries the same transparency, and that transparency is the popularity (0 where nobody rides, 143 on the faintest track, 255 on the busiest road). The history service downloads the z14 `ride` tiles over the bike-path area (`BIKEPATH_BBOX`, Mandurah to Two Rocks) in the background, slowly, middle outwards, and keeps just the transparency in `data/heat/grid`. A route is checked every 10–15 m against the strongest heat within 8 m of it. Tiles are re-downloaded after `HEATMAP_DAYS` (90), so the check each day costs nothing. Routes outside the area download the tiles they cross (up to 40 per check); anywhere without data is left out of the figure, and with heatmap data on under half the route no figure is shown.
+
+Progress of the download: `/api/heat/grid`.
 
 ## Ride history
 

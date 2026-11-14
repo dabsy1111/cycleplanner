@@ -54,7 +54,7 @@
   </div>
 
   <div id="stats" class="row stats">
-    <div><b id="s-dist">–</b><small>km</small></div>
+    <div><b id="s-dist">–</b><small>km<span id="s-heat"></span></small></div>
     <div><b id="s-asc">–</b><small>m up<span id="s-steep" title="Steepest 200 m of the route"></span></small></div>
     <div><b id="s-time">–</b><small>
       <span id="pace-flat">at <input id="speed" type="number" min="10" max="50" step="1" value="27"> km/h</span>
@@ -71,7 +71,7 @@
       <label class="opt"><input id="opt-turns" type="checkbox">
         <span><b>Fewer turns</b><small>Adds a cost to every turn, so the route sticks to fewer, longer roads instead of zigzagging through side streets. Easier to follow without looking at the screen.</small></span></label>
       <label class="opt"><input id="opt-alts" type="checkbox">
-        <span><b>Show alternatives</b><small>Routes the same points a few different ways (fastest, safest, touring) and keeps up to three that are really different from yours: each is labelled with what it wins on, shortest, least climbing or quietest. Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
+        <span><b>Show alternatives</b><small>Routes the same points a few different ways (fastest, safest, touring) and keeps up to three that are really different from yours: each is labelled with what it wins on: shortest, least climbing, quietest or most popular (from the ride heatmap). Drawn in grey. Tap one to ride it instead (this switches the routing profile to match).</small></span></label>
       <ul id="alts" class="stops"></ul>
     </details>
 
@@ -301,6 +301,7 @@
 <script src="loops.js"></script>
 <script src="history.js"></script>
 <script src="heatmap.js"></script>
+<script src="heatscore.js"></script>
 <script src="routes.js"></script>
 <script src="nogo.js"></script>
 <script src="climbs.js"></script>

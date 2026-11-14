@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import heatgrid
 import heattiles
 
 API_KEY = os.environ.get("ICU_API_KEY", "").strip()
@@ -755,6 +756,8 @@ class Handler(BaseHTTPRequestHandler):
                 heattiles.probe()  # check the proxy now rather than report an old answer
                 st = heattiles.status(act or None, col or None)
             self.send(200, json.dumps(st).encode())
+        elif path == "/api/heat/grid":
+            self.send(200, json.dumps(heatgrid.status()).encode())
         elif path.startswith("/api/heat/tile/"):
             self.heat_tile(path)
         else:
@@ -822,6 +825,21 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path.split("?")[0].rstrip("/") == "/api/heat/score":
+            # {"routes": [[[lon, lat], ...], ...]} -> {"routes": [{covered, mean, popular} | null], "grid": progress}
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                assert n <= 2_000_000
+                routes = json.loads(self.rfile.read(n))["routes"]
+                assert isinstance(routes, list) and len(routes) <= 20
+            except Exception:
+                self.send(400, b'{"error":"expected {routes: [[[lon, lat], ...], ...]}"}')
+                return
+            if not heattiles.configured():
+                self.send(503, b'{"error":"HEATMAP_URL is not set"}')
+                return
+            self.send(200, json.dumps({"routes": heatgrid.score(routes), "grid": heatgrid.status()}).encode())
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/regions/used":
             try:
                 tiles = self.body_json()
@@ -890,5 +908,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_network, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=bikepath_scheduler, daemon=True).start()
+    if heattiles.configured():
+        threading.Thread(target=heatgrid.scheduler, args=(BIKEPATH_BBOX,), daemon=True).start()
     print(f"History service on :8000 ({'connected to intervals.icu' if API_KEY else 'no ICU_API_KEY set'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()

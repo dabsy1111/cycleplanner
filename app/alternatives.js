@@ -55,6 +55,11 @@ function altChoices() {
   tryAdd(by((c) => c.rt.length).find((c) => !picks.some((p) => sameRoute(p.rt, c.rt))));
   tryAdd(by((c) => c.rt.ascend).find((c) => !picks.some((p) => sameRoute(p.rt, c.rt))));
   tryAdd(by((c) => c.mainPct).find((c) => !picks.some((p) => sameRoute(p.rt, c.rt))));
+  // The most popular one on the ride heatmap, once scores are in (heatscore.js).
+  const pop = (c) => (typeof heatPct === 'function' ? heatPct(c.rt) : null);
+  if (pool.some((c) => pop(c) != null)) {
+    tryAdd(by((c) => -(pop(c) ?? -1)).find((c) => pop(c) != null && !picks.some((p) => sameRoute(p.rt, c.rt))));
+  }
   for (const c of by((c) => c.rt.length / route.length + c.rt.ascend / Math.max(50, route.ascend) / 3 + c.mainPct / 100)) tryAdd(c);
   // Label what each one wins on, among the ones shown.
   const win = (f, label, slack) => {
@@ -66,6 +71,8 @@ function altChoices() {
   win((p) => p.rt.length, 'shortest', 200);
   win((p) => p.rt.ascend, 'least climbing', Math.max(5, route.ascend * 0.05));
   win((p) => p.mainPct, 'quietest', 2);
+  // Only when every route shown has a score, so a route with no heatmap data can't lose by default.
+  if (picks.every((p) => pop(p) != null)) win((p) => -pop(p), 'most popular', 3);
   return picks;
 }
 
@@ -92,9 +99,11 @@ function renderAlts() {
     if (c.current) li.classList.add('active');
     const dk = (c.rt.length - cur.rt.length) / 1000, du = Math.round(c.rt.ascend - cur.rt.ascend);
     const delta = c.current ? '' : ` (${dk >= 0 ? '+' : ''}${dk.toFixed(1)} km, ${du >= 0 ? '+' : ''}${du} m)`;
+    const pct = typeof heatPct === 'function' ? heatPct(c.rt) : null;
+    const popTxt = pct == null ? '' : ` · ${pct}% popular`;
     const wins = c.wins.map((w) => `<span class="tag win">${w}</span>`).join('');
     li.innerHTML = `<span class="km">${fmtKm(c.rt.length)}</span>` +
-      `<span>${c.current ? 'Your route' : PROFILE_NAME[c.prof] + (c.idx ? ` #${c.idx + 1}` : '')}${delta} · ${Math.round(c.rt.ascend)} m up, max ${c.steep.toFixed(0)}% · ${Math.round(c.mainPct)}% main road ${wins}</span>` +
+      `<span>${c.current ? 'Your route' : PROFILE_NAME[c.prof] + (c.idx ? ` #${c.idx + 1}` : '')}${delta} · ${Math.round(c.rt.ascend)} m up, max ${c.steep.toFixed(0)}% · ${Math.round(c.mainPct)}% main road${popTxt} ${wins}</span>` +
       `${c.current ? '<span class="off">riding this</span>' : ''}`;
     if (!c.current) {
       li.onmouseenter = () => highlightAlt(c);
@@ -136,6 +145,11 @@ async function loadAlternatives() {
   if (seq !== altSeq) return;
   altRoutes = found;
   renderAlts();
+  // Popularity arrives a moment later; label again when it does.
+  if (typeof scoreRoutes === 'function') {
+    await scoreRoutes([route, ...found.map((f) => f.rt)]);
+    if (seq === altSeq) renderAlts();
+  }
 }
 
 map.on('load', () => {

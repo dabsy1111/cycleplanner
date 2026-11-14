@@ -4,9 +4,11 @@
 
 const BIKE_KG = 9, CDA = 0.32, CRR = 0.0045, RHO = 1.2, DRIVETRAIN = 0.97, G = 9.81;
 const MAX_DESCENT_KMH = 50; // you brake on the way down
-// Until intervals.icu answers (or if it can't), assume a typical rider so times still make sense.
+// Your FTP and weight come from intervals.icu through the server, which keeps the last values it
+// got. This browser keeps a copy too, so the right numbers are there from the first moment, even
+// if the server can't be reached. Only if neither has ever had them is a typical rider assumed.
 const DEFAULT_ATHLETE = { ftp: 200, weight: 75, assumed: true };
-let athlete = DEFAULT_ATHLETE; // {ftp, weight}
+let athlete = store.get('cp.athlete', null) || DEFAULT_ATHLETE; // {ftp, weight, updated, stale}
 
 function pacePower() { return (athlete.ftp * (+$('pace-pct').value || 65)) / 100; }
 function powerMode() { return true; } // ride time always comes from power now (kept for older callers)
@@ -49,9 +51,11 @@ function modelRide(rt) {
 }
 
 function renderPaceUi() {
+  const at = `${Math.round(pacePower())} W, about ${Math.round(flatKmh())} km/h on the flat`;
   $('pace-power').title = athlete.assumed
-    ? `intervals.icu isn't connected, so this assumes ${athlete.ftp} W FTP and ${athlete.weight} kg: ${Math.round(pacePower())} W, about ${Math.round(flatKmh())} km/h on the flat`
-    : `${Math.round(pacePower())} W of your ${athlete.ftp} W FTP, ${athlete.weight} kg + ${BIKE_KG} kg bike: about ${Math.round(flatKmh())} km/h on the flat`;
+    ? `intervals.icu has never been reached, so this assumes ${athlete.ftp} W FTP and ${athlete.weight} kg: ${at}`
+    : `${athlete.ftp} W FTP, ${athlete.weight} kg + ${BIKE_KG} kg bike: ${at}.` +
+      (athlete.stale ? ` intervals.icu can't be reached right now, so these are the last values it gave${athlete.updated ? ` (${athlete.updated})` : ''}.` : '');
 }
 
 function paceChanged() {
@@ -64,12 +68,21 @@ $('pace-pct').value = store.get('cp.pacepct', 65);
 $('pace-pct').addEventListener('input', () => { store.set('cp.pacepct', +$('pace-pct').value); paceChanged(); });
 routeHooks.push(() => renderStats()); // re-run once the wind forecast for this route has loaded
 
-(async () => {
+// Check now, then hourly: a new FTP or weight on intervals.icu updates the saved values.
+async function loadAthlete() {
   try {
     const res = await fetch('/api/athlete');
     if (!res.ok) throw new Error();
     const a = await res.json();
-    if (a && a.ftp && a.weight) athlete = a;
-  } catch { /* keep the assumed rider */ }
+    if (a && a.ftp && a.weight) {
+      athlete = a;
+      store.set('cp.athlete', { ftp: a.ftp, weight: a.weight, updated: a.updated });
+    }
+  } catch {
+    // Server unreachable: keep what this browser last saw, marked as not current.
+    if (!athlete.assumed) athlete = { ...athlete, stale: true };
+  }
   paceChanged();
-})();
+}
+loadAthlete();
+setInterval(loadAthlete, 3600 * 1000);

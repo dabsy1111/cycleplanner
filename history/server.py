@@ -406,24 +406,61 @@ def settings_put(key, value):
 
 
 # ---------- athlete (FTP and weight for ride-time estimates) ----------
-athlete_cache = {"at": 0, "data": None}
+# The last values intervals.icu gave are kept in data/athlete.json, so ride times still use your
+# own FTP and weight when intervals.icu can't be reached (or the key is removed). They're checked
+# again hourly and the file is updated whenever intervals.icu has something new.
+ATHLETE_FILE = os.path.join(os.environ.get("DATA_DIR", "/data"), "athlete.json")
+ATHLETE_CHECK = 3600
+
+
+def _load_athlete():
+    try:
+        with open(ATHLETE_FILE) as f:
+            d = json.load(f)
+        return d if d.get("ftp") and d.get("weight") else None
+    except (OSError, ValueError):
+        return None
+
+
+athlete_cache = {"at": 0, "data": _load_athlete(), "error": None}
 
 
 def athlete_info():
-    if not API_KEY:
-        return None
-    if athlete_cache["data"] and time.time() - athlete_cache["at"] < 6 * 3600:
-        return athlete_cache["data"]
-    a = api(f"/api/v1/athlete/{ATHLETE}")
-    weight = a.get("icu_weight") or a.get("weight")
-    ftp = None
-    for s in a.get("sportSettings") or []:
-        if "Ride" in (s.get("types") or []):
-            ftp = s.get("ftp") or s.get("indoor_ftp")
-            break
-    data = {"ftp": ftp, "weight": weight}
-    athlete_cache.update(at=time.time(), data=data)
-    return data
+    """{ftp, weight, updated, stale, error}. stale = intervals.icu couldn't be asked just now,
+    these are the last values it gave. None if it has never answered."""
+    stored = athlete_cache["data"]
+    if time.time() - athlete_cache["at"] < ATHLETE_CHECK:
+        if stored:
+            return {**stored, "stale": bool(athlete_cache["error"]), "error": athlete_cache["error"]}
+        if athlete_cache["error"]:
+            raise RuntimeError(athlete_cache["error"])  # failed in the last 10 minutes: don't wait on it again
+    try:
+        if not API_KEY:
+            raise RuntimeError("ICU_API_KEY not set")
+        a = api(f"/api/v1/athlete/{ATHLETE}")
+        weight = a.get("icu_weight") or a.get("weight")
+        ftp = None
+        for st in a.get("sportSettings") or []:
+            if "Ride" in (st.get("types") or []):
+                ftp = st.get("ftp") or st.get("indoor_ftp")
+                break
+        # A blank field on intervals.icu doesn't wipe a value we already have.
+        ftp = ftp or (stored or {}).get("ftp")
+        weight = weight or (stored or {}).get("weight")
+        if not (ftp and weight):
+            raise RuntimeError("intervals.icu has no ride FTP or weight set")
+        if not stored or stored.get("ftp") != ftp or stored.get("weight") != weight:
+            stored = {"ftp": ftp, "weight": weight, "updated": time.strftime("%Y-%m-%d")}
+            _write_json(ATHLETE_FILE, stored)
+            print(f"athlete: FTP {ftp} W, weight {weight} kg (saved)", flush=True)
+        athlete_cache.update(at=time.time(), data=stored, error=None)
+        return {**stored, "stale": False, "error": None}
+    except Exception as e:
+        # Don't ask again for 10 minutes; meanwhile answer with what we have.
+        athlete_cache.update(at=time.time() - ATHLETE_CHECK + 600, error=str(e)[:200])
+        if stored:
+            return {**stored, "stale": True, "error": athlete_cache["error"]}
+        raise
 
 
 # ---------- Overpass proxy with a disk cache ----------
@@ -714,10 +751,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/athlete":
             try:
                 info = athlete_info()
-            except Exception as e:
+            except Exception as e:  # intervals.icu has never answered: nothing saved yet
                 self.send(502, json.dumps({"error": str(e)[:200]}).encode())
                 return
-            self.send(200 if info else 404, json.dumps(info or {"error": "ICU_API_KEY not set"}).encode())
+            self.send(200, json.dumps(info).encode())
         elif path.startswith("/api/routes/"):
             r = route_get(path.rsplit("/", 1)[1])
             self.send(200 if r else 404, json.dumps(r or {"error": "not found"}).encode())

@@ -66,7 +66,7 @@ The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `c
 
 ## Ride time from your power
 
-The app reads your ride FTP and weight from intervals.icu (through the history service) and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). There's no flat-speed option. If intervals.icu can't be reached it assumes 200 W FTP and 75 kg, and says so when you hover the % FTP box. Anything that needs one speed (wind timing, interval stretch lengths, sizing loops by time) uses your % of FTP on the flat.
+The app reads your ride FTP and weight from intervals.icu (through the history service) and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). There's no flat-speed option. The last FTP and weight intervals.icu gave are saved on the server (`data/athlete.json`) and in the browser, and checked again hourly: a change on intervals.icu updates them, and when it can't be reached the saved values are used (hovering the % FTP box says so). Only if intervals.icu has never answered does it assume 200 W and 75 kg. Anything that needs one speed (wind timing, interval stretch lengths, sizing loops by time) uses your % of FTP on the flat.
 
 ## Roads you like and places to avoid
 

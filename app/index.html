@@ -57,6 +57,41 @@
   <div id="msg" class="row msg" hidden></div>
 
   <div class="scroll">
+    <details class="sec" data-key="loops" open>
+      <summary>Loop generator</summary>
+      <div class="row small">
+        About <input id="loop-km" type="number" min="5" max="300" step="5" value="50"> km
+        or <input id="loop-hrs" type="text" inputmode="decimal" placeholder="2:00" size="5" title="Ride time, e.g. 2:30 or 1.5"> h
+      </div>
+      <div id="loop-time" class="small hint"></div>
+      <div class="row buttons"><button id="loop-go">Make loops</button></div>
+      <details class="sec" data-key="loopopts">
+        <summary>Loop options</summary>
+        <label class="opt"><input id="lp-through" type="checkbox" checked>
+          <span><b>Loop through my second point</b><small>If you've put down a second point, every loop goes from the start out to that point and back home a different way. The distance is raised if the point is too far for it.</small></span></label>
+        <label class="opt sub"><input id="lp-oneway" type="checkbox">
+          <span><b>Finish there (A to B)</b><small>Instead of coming home, end at your second point, taking a longer way to fill the distance or time you set.</small></span></label>
+        <div class="loopopts">
+          <label class="opt"><input id="lp-noback" type="checkbox" checked>
+            <span><b>Don't double back</b><small>Rejects loops that ride the same road twice and tries again with shifted waypoints. Each loop shows how much of it repeats. (Dead-end spikes, where a loop point lands in a side street, are always trimmed off.)</small></span></label>
+          <label class="opt"><input id="lp-snap" type="checkbox">
+            <span><b>Snap points to bike paths</b><small>Moves each loop waypoint onto the nearest bike or shared path within 600 m, so loops are built from paths instead of random suburban streets. Slower: looks up paths in OpenStreetMap first.</small></span></label>
+          <label class="opt"><input id="lp-climb" type="checkbox">
+            <span><b>Climbing target</b><small>Makes more loops and ranks them by how close they come to this much climbing. In Perth, bigger targets pull loops towards the hills.</small></span></label>
+          <div class="row small">About <input id="lp-climb-m" type="number" min="50" max="3000" step="50" value="400"> m of climbing</div>
+          <label class="opt"><input id="lp-interval" type="checkbox">
+            <span><b>Include an interval stretch</b><small>Only shows loops with at least one uninterrupted stretch (no lights, stop signs, roundabouts or sharp turns), and highlights it. Uses the length and terrain set under More › Interval stretches: <span id="lp-interval-rule">8 min, flat</span>.</small></span></label>
+          <label class="opt"><span style="width:13px"></span>
+            <span><b>Roads I've ridden</b><small>Uses your intervals.icu ride history to rank loops.</small>
+            <select id="lp-novelty" class="inline"><option value="off">don't mind</option><option value="new">favour new roads</option><option value="familiar">favour familiar roads</option></select></span></label>
+        </div>
+        <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile and traffic setting at the top and the Route options below (with "avoid busy roads", loops with less main road come first). Loops using more of your liked roads rank higher, and "snap points" uses liked roads as well as bike paths. Each loop is ridden whichever way gives a tailwind home.</p>
+      </details>
+      <div id="loop-progress" class="loop-progress" hidden></div>
+      <div id="loop-status" class="small"></div>
+      <ul id="loops" class="stops"></ul>
+    </details>
+
     <details class="sec" data-key="ropts" open>
       <summary>Route options</summary>
       <label class="opt"><input id="opt-footpaths" type="checkbox" checked>
@@ -92,37 +127,6 @@
 
 
 
-    <details class="sec" data-key="loops">
-      <summary>Loop generator</summary>
-      <div class="row small">
-        About <input id="loop-km" type="number" min="5" max="300" step="5" value="50"> km
-        or <input id="loop-hrs" type="text" inputmode="decimal" placeholder="2:00" size="5" title="Ride time, e.g. 2:30 or 1.5"> h
-      </div>
-      <div id="loop-time" class="small hint"></div>
-      <label class="opt"><input id="lp-through" type="checkbox" checked>
-        <span><b>Loop through my second point</b><small>If you've put down a second point, every loop goes from the start out to that point and back home a different way. The distance is raised if the point is too far for it.</small></span></label>
-      <label class="opt sub"><input id="lp-oneway" type="checkbox">
-        <span><b>Finish there (A to B)</b><small>Instead of coming home, end at your second point, taking a longer way to fill the distance or time you set.</small></span></label>
-      <p class="hint">Starts from your first point, or the middle of the map if there isn't one. Uses the profile, traffic and route options above (with "avoid busy roads", loops with less main road come first). Loops using more of your liked roads rank higher, and "snap points" uses liked roads as well as bike paths. Each loop is ridden whichever way gives a tailwind home.</p>
-      <div class="loopopts">
-        <label class="opt"><input id="lp-noback" type="checkbox" checked>
-          <span><b>Don't double back</b><small>Rejects loops that ride the same road twice and tries again with shifted waypoints. Each loop shows how much of it repeats. (Dead-end spikes, where a loop point lands in a side street, are always trimmed off.)</small></span></label>
-        <label class="opt"><input id="lp-snap" type="checkbox">
-          <span><b>Snap points to bike paths</b><small>Moves each loop waypoint onto the nearest bike or shared path within 600 m, so loops are built from paths instead of random suburban streets. Slower: looks up paths in OpenStreetMap first.</small></span></label>
-        <label class="opt"><input id="lp-climb" type="checkbox">
-          <span><b>Climbing target</b><small>Makes more loops and ranks them by how close they come to this much climbing. In Perth, bigger targets pull loops towards the hills.</small></span></label>
-        <div class="row small">About <input id="lp-climb-m" type="number" min="50" max="3000" step="50" value="400"> m of climbing</div>
-        <label class="opt"><input id="lp-interval" type="checkbox">
-          <span><b>Include an interval stretch</b><small>Only shows loops with at least one uninterrupted stretch (no lights, stop signs, roundabouts or sharp turns), and highlights it. Uses the length and terrain set under More › Interval stretches: <span id="lp-interval-rule">8 min, flat</span>.</small></span></label>
-        <label class="opt"><span style="width:13px"></span>
-          <span><b>Roads I've ridden</b><small>Uses your intervals.icu ride history to rank loops.</small>
-          <select id="lp-novelty" class="inline"><option value="off">don't mind</option><option value="new">favour new roads</option><option value="familiar">favour familiar roads</option></select></span></label>
-      </div>
-      <div class="row buttons"><button id="loop-go">Make loops</button></div>
-      <div id="loop-progress" class="loop-progress" hidden></div>
-      <div id="loop-status" class="small"></div>
-      <ul id="loops" class="stops"></ul>
-    </details>
 
     <details class="sec" data-key="history">
       <summary>Ride history</summary>

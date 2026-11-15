@@ -10,8 +10,9 @@ import java.util.zip.Inflater;
  * Popularity heat for BRouter (Cycle Planner patch, not part of upstream BRouter).
  *
  * Reads the heat grid the history service writes to /data/heat/grid/ride/14 (one file per z14
- * tile: x/y.a = 2-byte width + zlib-compressed alpha bytes, x/y.empty = tile known to have no
- * rides). Alpha 0 = nobody rides here, 143 = faintest track, 255 = busiest road.
+ * tile: x/y.h = 2-byte width + zlib-compressed heat bytes, 0 = nobody rides here, 255 = as busy as
+ * the busiest roads; x/y.empty = tile known to have no rides). How heat is worked out from the
+ * heatmap is in history/heatgrid.py; this class only reads it, so routing and route scores agree.
  *
  * OsmPath multiplies each way section's cost by multiplier(), so with heat_strength = s a road
  * nobody rides costs (1 + s) times as much as the busiest road. Multipliers never go below 1, which
@@ -20,20 +21,19 @@ import java.util.zip.Inflater;
 final class HeatGrid {
   static final String DIR = System.getenv().getOrDefault("HEAT_GRID", "/data/heat/grid/ride/14");
   static final int Z = 14;
-  static final int SIZE = 256;          // tiles are max-pooled to 256 px: ~8 m per pixel around Perth
-  static final float FLOOR = 143f;      // faintest track -> heat 0
   // Where there's no heat data (not downloaded yet, or outside the area) we assume middling
   // popularity rather than none. Treating it as heat 1 would make the router prefer unknown
   // ground over every road it knows about; treating it as heat 0 would make it avoid it.
   static final double UNKNOWN_HEAT = 0.5;
-  static final int MAX_TILES = 800;     // ~50 MB of 64 KB tiles
+  static final int MAX_TILES = 800;     // ~50 MB of 64 KB (256 x 256) tiles
   static final long RECHECK_MS = 10 * 60 * 1000L;  // look again for tiles that weren't there
 
   private static final class Tile {
-    final byte[] px;      // SIZE*SIZE pooled alpha, or null
+    final byte[] px;      // size*size heat, or null
+    final int size;
     final boolean empty;  // known: nobody rides here
     final long checked;
-    Tile(byte[] px, boolean empty) { this.px = px; this.empty = empty; this.checked = System.currentTimeMillis(); }
+    Tile(byte[] px, int size, boolean empty) { this.px = px; this.size = size; this.empty = empty; this.checked = System.currentTimeMillis(); }
     boolean missing() { return px == null && !empty; }
   }
 
@@ -55,7 +55,8 @@ final class HeatGrid {
     return 1. + strength * (1. - sum / n);
   }
 
-  /** Heat 0..1 at a point (strongest within ~8 m), or -1 if there's no data there. */
+  /** Heat 0..1 at a point, or -1 if there's no data there. The grid already looks ~16 m around
+   *  each pixel, so this reads the one pixel the point is in. */
   static double heat(double lon, double lat) {
     lat = Math.max(-85.05112878, Math.min(85.05112878, lat));
     double n = 1 << Z;
@@ -66,16 +67,9 @@ final class HeatGrid {
     Tile t = tile(tx, ty);
     if (t.empty) return 0.;
     if (t.px == null) return -1.;
-    int x = (int) ((gx - Math.floor(gx)) * SIZE), y = (int) ((gy - Math.floor(gy)) * SIZE);
-    int best = 0;
-    for (int yy = Math.max(0, y - 1); yy <= Math.min(SIZE - 1, y + 1); yy++) {
-      for (int xx = Math.max(0, x - 1); xx <= Math.min(SIZE - 1, x + 1); xx++) {
-        int v = t.px[yy * SIZE + xx] & 0xff;
-        if (v > best) best = v;
-      }
-    }
-    if (best == 0) return 0.;
-    return Math.max(0., Math.min(1., (best - FLOOR) / (255f - FLOOR)));
+    int x = Math.min(t.size - 1, (int) ((gx - Math.floor(gx)) * t.size));
+    int y = Math.min(t.size - 1, (int) ((gy - Math.floor(gy)) * t.size));
+    return (t.px[y * t.size + x] & 0xff) / 255.;
   }
 
   private static Tile tile(int x, int y) {
@@ -99,7 +93,7 @@ final class HeatGrid {
 
   private static Tile load(int x, int y) {
     File base = new File(DIR, Integer.toString(x));
-    File a = new File(base, y + ".a");
+    File a = new File(base, y + ".h");
     try {
       if (a.isFile()) {
         byte[] d = Files.readAllBytes(a.toPath());
@@ -114,26 +108,13 @@ final class HeatGrid {
           got += k;
         }
         inf.end();
-        return new Tile(pool(raw, w), false);
+        return new Tile(raw, w, false);
       }
-      if (new File(base, y + ".empty").isFile()) return new Tile(null, true);
+      if (new File(base, y + ".empty").isFile()) return new Tile(null, 0, true);
     } catch (Exception e) {
       System.out.println("heat grid: can't read tile " + x + "/" + y + ": " + e);
     }
-    return new Tile(null, false);
+    return new Tile(null, 0, false);
   }
 
-  /** Shrink a w x w alpha tile to SIZE x SIZE keeping the strongest value of each block. */
-  private static byte[] pool(byte[] raw, int w) {
-    if (w == SIZE) return raw;
-    byte[] out = new byte[SIZE * SIZE];
-    for (int y = 0; y < w; y++) {
-      int oy = y * SIZE / w;
-      for (int x = 0; x < w; x++) {
-        int o = oy * SIZE + x * SIZE / w;
-        if ((raw[y * w + x] & 0xff) > (out[o] & 0xff)) out[o] = raw[y * w + x];
-      }
-    }
-    return out;
-  }
 }

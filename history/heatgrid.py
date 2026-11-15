@@ -1,18 +1,25 @@
-"""Popularity heat as numbers, for scoring routes (Part 2a: rank BRouter's routes, no BRouter changes).
+"""Popularity heat as numbers, for scoring routes and for the patched BRouter (Popular roads).
 
 The heatmap PNGs carry popularity in their transparency: every colour scheme from the proxy has
-the same alpha channel, 0 where nobody rides, 143 on the faintest track, 255 on the busiest road.
-So we keep just that channel, one byte per pixel, and ignore the colours.
+the same alpha channel, 0 where nobody rides, about 80 on the faintest track, 255 on the busiest.
+
+What 'popular' means here (checked against real tiles and rides, Nov 2026): any road with a fair
+number of riders has a saturated centre line, so the strongest pixel near a road barely separates
+a quiet street from a busy one. What does separate them is how WIDE the strong part of the line
+is. So a road's heat is the share of a ~32 m square around it at alpha >= 230, scaled so that
+0.7 of the square (a typical busy road) is heat 1. On real Perth data: residential streets and
+footways 0, a quieter road such as through Dalkeith ~0.4, bike paths ~0.6, main roads ~0.6-0.7,
+the busiest roads and paths 0.9-1.
 
 Pipeline:
   1. build()  walks every z14 'ride' tile over BIKEPATH_BBOX (Mandurah to Two Rocks), nearest to
      the middle first. Tiles come through heattiles, so they're throttled, shared with the map
      overlay, and only re-downloaded after HEATMAP_DAYS (90). Runs at start, then checks daily.
-  2. Each PNG is decoded to its alpha channel and kept as data/heat/grid/ride/14/<x>/<y>.a
-     (zlib-compressed, 2-byte width header). Mostly-empty tiles compress to a few KB. Tiles with
-     no rides at all get an <y>.empty marker instead. The patched BRouter reads the same files.
-  3. score(route) samples the route every few metres, reads the brightest pixel within ~8 m of
-     each sample (heat lines and road lines are often a few metres apart), and reports how much
+  2. Each PNG is turned into a 256x256 grid of heat (0-255, ~8 m a pixel) and kept as
+     data/heat/grid/ride/14/<x>/<y>.h (zlib-compressed, 2-byte width header). Tiles with no rides
+     at all get an <y>.empty marker instead. The patched BRouter reads the same files, so route
+     scores and routing always agree.
+  3. score(route) samples the route every few metres, reads the heat there, and reports how much
      of the route has data and how popular it is.
 
 Routes outside the downloaded area fetch the tiles they cross on demand (up to a cap per request);
@@ -32,12 +39,14 @@ ACTIVITY = "ride"
 COLOR = os.environ.get("HEATMAP_GRID_COLOR", "hot")  # any scheme works: alpha is the same in all
 Z = 14
 GRID = os.path.join(os.environ.get("DATA_DIR", "/data"), "heat", "grid", ACTIVITY, str(Z))
-ALPHA_FLOOR = 143      # faintest track in the proxy's tiles; scaled to heat 0
-POPULAR = 0.5          # heat at or above this counts as a 'popular' road (alpha ~199)
-WINDOW_M = 8           # look this far either side of the route for the heat line
+BUSY_ALPHA = 230       # a pixel at least this strong is part of a busy line
+HALF_WINDOW_PX = 4     # half the square, in the proxy's 512 px tiles (~4 m a pixel): ~32 m square
+FULL_SHARE = 0.7       # this share of the square busy = heat 1
+HEAT_SIZE = 256        # heat grid pixels per tile (~8 m)
+POPULAR = 0.5          # heat at or above this counts as a 'popular' road
 ON_DEMAND_CAP = 40     # tiles a single score request may download
 
-_mem = OrderedDict()   # (x, y) -> (width, alpha bytes) | None (no heat); most recent last
+_mem = OrderedDict()   # (x, y) -> (width, heat bytes) | None (no heat); most recent last
 _mem_lock = threading.Lock()
 MEM_TILES = 128        # 512x512 tiles are 256 KB decoded: ~32 MB at most
 
@@ -124,23 +133,56 @@ def png_alpha(data):
     return w, bytes(out)
 
 
+# ---------- alpha -> heat ----------
+
+_BUSY = bytes(1 if v >= BUSY_ALPHA else 0 for v in range(256))
+
+
+def heat_grid(alpha, w):
+    """HEAT_SIZE x HEAT_SIZE heat bytes (0-255) from a w x w alpha tile: for each pixel, the share
+    of the square around it that's busy, scaled by FULL_SHARE. Box sums from an integral image, so
+    a 512 px tile takes a fraction of a second in plain Python."""
+    from itertools import accumulate
+    mask = alpha.translate(_BUSY)
+    S = [[0] * (w + 1)]
+    for y in range(w):
+        row = accumulate(mask[y * w:(y + 1) * w], initial=0)
+        S.append([a + b for a, b in zip(S[-1], row)])
+    scale = w / HEAT_SIZE
+    half = HALF_WINDOW_PX * w / 512
+    out = bytearray(HEAT_SIZE * HEAT_SIZE)
+    for oy in range(HEAT_SIZE):
+        cy = (oy + 0.5) * scale
+        y0, y1 = max(0, int(cy - half)), min(w, int(cy + half))
+        s0, s1 = S[y0], S[y1]
+        for ox in range(HEAT_SIZE):
+            cx = (ox + 0.5) * scale
+            x0, x1 = max(0, int(cx - half)), min(w, int(cx + half))
+            n = s1[x1] - s0[x1] - s1[x0] + s0[x0]
+            if n:
+                share = n / ((y1 - y0) * (x1 - x0))
+                out[oy * HEAT_SIZE + ox] = min(255, round(255 * share / FULL_SHARE))
+    return bytes(out)
+
+
 # ---------- grid files ----------
 
 def grid_path(x, y):
-    return os.path.join(GRID, str(x), f"{y}.a")
+    return os.path.join(GRID, str(x), f"{y}.h")
 
 
-def _save_grid(x, y, width, alpha):
+def _save_grid(x, y, width, heat):
     p = grid_path(x, y)
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tmp = p + ".tmp"
     with open(tmp, "wb") as f:
-        f.write(struct.pack(">H", width) + zlib.compress(alpha, 6))
+        f.write(struct.pack(">H", width) + zlib.compress(heat, 6))
     os.replace(tmp, p)
-    try:
-        os.remove(p[:-2] + ".empty")  # it has heat now
-    except OSError:
-        pass
+    for old in (p[:-2] + ".empty", p[:-2] + ".a"):  # it has heat now / grid from before Nov 2026
+        try:
+            os.remove(old)
+        except OSError:
+            pass
 
 
 def _load_grid(x, y):
@@ -185,14 +227,14 @@ def ensure_tile(x, y, allow_fetch=True):
     except OSError:
         pass
     width, alpha = png_alpha(tile)
-    _save_grid(x, y, width, alpha)
+    _save_grid(x, y, HEAT_SIZE, heat_grid(alpha, width))
     with _mem_lock:
         _mem.pop((x, y), None)
     return "heat"
 
 
 def _tile_alpha(x, y, budget):
-    """(width, alpha) for a tile, None if it has no heat, 'missing' if unknown.
+    """(width, heat bytes) for a tile, None if it has no heat, 'missing' if unknown.
     `budget` is a one-item list: downloads this request may still make."""
     key = (x, y)
     with _mem_lock:
@@ -284,7 +326,8 @@ def _resample(coords, step):
 
 
 def heat_at(lon, lat, budget, cache):
-    """Heat 0..1 at a point (brightest pixel within WINDOW_M), or None if there's no data."""
+    """Heat 0..1 at a point, or None if there's no data. The grid already looks ~16 m around each
+    pixel, so this just reads the pixel the point falls in."""
     gx, gy = lonlat_to_px(lon, lat, Z, 1)
     tx, ty = int(gx), int(gy)
     key = (tx, ty)
@@ -295,20 +338,9 @@ def heat_at(lon, lat, budget, cache):
         return None
     if t is None:
         return 0.0
-    width, alpha = t
-    px, py = int((gx - tx) * width), int((gy - ty) * width)
-    m_per_px = 40075016.686 * math.cos(math.radians(lat)) / ((1 << Z) * width)
-    r = max(1, round(WINDOW_M / m_per_px))
-    best = 0
-    # Stay inside this tile; at a tile edge the window is a little smaller, which is fine.
-    for yy in range(max(0, py - r), min(width, py + r + 1)):
-        row = yy * width
-        v = max(alpha[row + max(0, px - r): row + min(width, px + r + 1)], default=0)
-        if v > best:
-            best = v
-    if best == 0:
-        return 0.0
-    return max(0.0, min(1.0, (best - ALPHA_FLOOR) / (255 - ALPHA_FLOOR)))
+    width, heat = t
+    px, py = min(width - 1, int((gx - tx) * width)), min(width - 1, int((gy - ty) * width))
+    return heat[py * width + px] / 255.0
 
 
 def score(routes):

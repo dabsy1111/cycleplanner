@@ -23,6 +23,7 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import auth
 import heatgrid
 import heattiles
 
@@ -746,6 +747,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?")[0].rstrip("/")
+        if path.startswith("/api/auth/") and auth.handle(self, "GET", path):
+            return
         if path == "/api/routes":
             self.send(200, json.dumps(route_list()).encode())
         elif path == "/api/athlete":
@@ -862,6 +865,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(404, b'{"error":"not found"}')
 
     def do_POST(self):
+        if self.path.startswith("/api/auth/") and auth.handle(self, "POST", self.path.split("?")[0].rstrip("/")):
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/heat/score":
             # {"routes": [[[lon, lat], ...], ...]} -> {"routes": [{covered, mean, popular} | null], "grid": progress}
             try:
@@ -947,5 +952,6 @@ if __name__ == "__main__":
     threading.Thread(target=bikepath_scheduler, daemon=True).start()
     if heattiles.configured():
         threading.Thread(target=heatgrid.scheduler, args=(BIKEPATH_BBOX,), daemon=True).start()
+    print("Login: " + (f"on (user {auth.USERNAME})" if auth.enabled() else "OFF - set CP_PASSWORD before putting this on the internet"), flush=True)
     print(f"History service on :8000 ({'connected to intervals.icu' if API_KEY else 'no ICU_API_KEY set'})", flush=True)
     ThreadingHTTPServer(("0.0.0.0", 8000), Handler).serve_forever()

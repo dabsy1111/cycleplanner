@@ -270,11 +270,15 @@
         <div class="row buttons"><button id="rep-download">Download report</button><button id="rep-copy">Copy report</button></div>
         <div id="rep-status" class="small"></div>
       </details>
+      <form id="signout" class="row small" method="post" action="/api/auth/logout" hidden>
+        Signed in. <button type="submit" class="linkbtn">Sign out</button>
+      </form>
     </details>
 
   </div>
 </aside>
 
+<script src="auth.js"></script>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script src="app.js"></script>
 <script src="pace.js"></script>

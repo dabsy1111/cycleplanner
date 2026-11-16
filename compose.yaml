@@ -14,6 +14,9 @@ services:
     restart: unless-stopped
     environment:
       ICU_API_KEY: ""        # intervals.icu > Settings > Developer Settings > API key
+      # Login for the planner. Set a password before exposing it to the internet; empty = no login.
+      CP_USERNAME: "dan"
+      CP_PASSWORD: ""
       SYNC_HOURS: 6
       # Popularity heatmap proxy. {activity} {color} {z} {x} {y} are filled in. host.docker.internal
       # is this server; the proxy has to accept connections from outside itself (see README).

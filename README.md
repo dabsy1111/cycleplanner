@@ -28,7 +28,17 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `HEATMAP_DAYS` (history) | `90` | Ask the heatmap proxy again for tiles older than this. Old tiles are kept and used if the proxy is down. |
 | `HEATMAP_GAP` (history) | `0.3` | Seconds between requests to the heatmap proxy. |
 
+| `CP_USERNAME` (history) | `dan` | Login name for the planner. |
+| `CP_PASSWORD` (history) | empty | Login password. Empty means no login, which is only OK on your home network. |
+| `CP_SESSION_DAYS` (history) | `90` | How long "Keep me signed in" lasts. Unticked, you're signed out when the browser closes (12 h at most). |
+
 The web port is `8095`; change the left side of `8095:80` if that clashes with something.
+
+## Login
+
+With `CP_PASSWORD` set, every page, route request, tile and API call needs you signed in; the only things open are the sign-in page and `/api/auth/`. nginx checks each request with the history service (`auth_request`) and remembers the answer for a minute per session. Sessions are signed cookies (HttpOnly, SameSite=Lax, Secure when the request came in over HTTPS through a proxy that sets `X-Forwarded-Proto`), keyed by a random secret in `data/auth-secret` plus the password, so they survive restarts and changing the password signs every device out. Eight wrong passwords from one address within 15 minutes locks that address out until the attempts age off, and each wrong try takes a second. Failed logins are printed in the history service's log. **More › Sign out** ends the session on that device.
+
+The password crosses the network in the clear unless the planner sits behind HTTPS (a reverse proxy such as Caddy or Nginx Proxy Manager, or a Cloudflare Tunnel). Shared route links (`#r=...`) need a login too.
 
 ## Popularity heatmap
 

@@ -92,6 +92,27 @@
       <ul id="loops" class="stops"></ul>
     </details>
 
+    <details class="sec" data-key="hunt">
+      <summary>Segment hunter</summary>
+      <p class="hint">Strava segments where your power and weight (from intervals.icu) plus the forecast wind at your ride time in Weather &amp; wind could put you in the top 10. Green: you'd beat 10th. Amber: within 5%. Tick some and route through them.</p>
+      <div class="row small">For <span id="hunt-when"></span></div>
+      <div class="row small">
+        Effort <input id="hunt-effort" type="number" min="80" max="110" step="1" value="100">% of your 90-day bests,
+        segments up to <input id="hunt-maxkm" type="number" min="0.5" max="50" step="0.5" value="5"> km
+      </div>
+      <div class="row buttons">
+        <button id="hunt-scan" hidden>Find segments in this view</button>
+        <button id="hunt-connect" hidden>Connect Strava</button>
+      </div>
+      <div class="row search"><input id="hunt-add-id" type="text" placeholder="Add a segment: Strava link or number"><button id="hunt-add">Add</button></div>
+      <div id="hunt-status" class="small"></div>
+      <ul id="hunt-list" class="stops hunt"></ul>
+      <div class="row buttons"><button id="hunt-route" disabled>Tick segments to route through them</button></div>
+      <p class="hint">Times are flat out (CdA 0.30, wind at rider height taken as 70% of the forecast) from a rolling start. Top 10 comes from Strava's public leaderboard widget, which leaves out athletes who hide themselves, so when 10th is hidden you're shown the last time listed. Long segments are mostly bunch rides: keep the length limit low.</p>
+      <div id="hunt-server" class="small hint"></div>
+      <div class="row small"><button id="hunt-disconnect" class="linkbtn" hidden>Disconnect Strava</button></div>
+    </details>
+
     <details class="sec" data-key="ropts" open>
       <summary>Route options</summary>
       <label class="opt"><input id="opt-footpaths" type="checkbox" checked>
@@ -297,5 +318,6 @@
 <script src="roads.js"></script>
 <script src="gpximport.js"></script>
 <script src="report.js"></script>
+<script src="segments.js"></script>
 </body>
 </html>

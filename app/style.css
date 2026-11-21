@@ -219,3 +219,11 @@ div.opt > span { padding-left: 21px; }
 .row.opts { flex-wrap: nowrap; }
 .row.opts #profile { flex: 1; min-width: 0; width: auto; }
 .row.opts #opt-traffic { flex: 1; min-width: 0; width: auto; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; }
+
+/* Segment hunter */
+.stops.hunt li { align-items: flex-start; }
+.stops.hunt li input { margin-top: 3px; flex: none; }
+.stops.hunt li small { color: var(--muted); }
+.hunt-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 4px; }
+#hunt-effort, #hunt-maxkm { width: 52px; }
+#hunt-add-id { flex: 1; }

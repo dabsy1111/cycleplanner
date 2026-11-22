@@ -27,6 +27,9 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `HEATMAP_URL` (history) | empty | Tile URL of your popularity heatmap proxy, with `{activity}` `{color}` `{z}` `{x}` `{y}`. See below. |
 | `HEATMAP_DAYS` (history) | `90` | Ask the heatmap proxy again for tiles older than this. Old tiles are kept and used if the proxy is down. |
 | `HEATMAP_GAP` (history) | `0.3` | Seconds between requests to the heatmap proxy. |
+| `STRAVA_LB_DAYS` (history) | `7` | Fetch a segment's top-10 times again once they're this old. |
+| `STRAVA_GAP` (history) | `3` | Seconds between requests to bikeclimbs, Strava's widget and VeloViewer. |
+| `BIKECLIMBS_DAYS` (history) | `90` | Refresh the segment list this often. `0` turns the list off (segments by link only). |
 
 | `CP_USERNAME` (history) | `dan` | Login name for the planner. |
 | `CP_PASSWORD` (history) | empty | Login password. Empty means no login, which is only OK on your home network. |
@@ -80,6 +83,19 @@ The app routes with patched copies of BRouter's bike profiles (`cp-fastbike`, `c
 
 The app reads your ride FTP and weight from intervals.icu (through the history service) and estimates time at a % of FTP you choose (default 65%). It works through every 100 m of the route with the gradient and the forecast wind at that point (CdA 0.32, Crr 0.0045, 9 kg bike, descents capped at 50 km/h). There's no flat-speed option. The last FTP and weight intervals.icu gave are saved on the server (`data/athlete.json`) and in the browser, and checked again hourly: a change on intervals.icu updates them, and when it can't be reached the saved values are used (hovering the % FTP box says so). Only if intervals.icu has never answered does it assume 200 W and 75 kg. Anything that needs one speed (wind timing, interval stretch lengths, sizing loops by time) uses your % of FTP on the flat.
 
+## Segment hunter
+
+Finds Strava segments where you could make the top 10, and routes you through the ones you tick. For each segment it works out your time flat out: your best power for that length of effort over the last 90 days (from intervals.icu; if it has no power curve, FTP plus 16 kJ of anaerobic work), your weight, the segment's gradient, and the forecast wind at the time set in Weather & wind (70% of the 10 m forecast, for rider height). CdA 0.30, Crr 0.0045, 9 kg bike, rolling start. That's compared with 10th place: green you'd beat it, amber within 5%. "Effort" scales your power, e.g. 95% for tired legs. Tick segments and press Route: the route goes from your start point (or Home) through each one in the right direction and back, with points along each segment to keep it on there.
+
+Where the data comes from (no Strava login or API key anywhere):
+- **The segment list**: [bikeclimbs.com](https://bikeclimbs.com), which lists every Strava ride segment with an uphill average (even 0.1%) by council and suburb, with its start, length and grade. The history service walks its WA pages once in the background (one page every 3 s, about 20 minutes), keeps segments starting inside `BIKEPATH_BBOX`, and refreshes every 90 days. Downhill segments aren't on bikeclimbs: paste their Strava link into "Add a segment".
+- **Top 10**: Strava's public segment widget (`strava.com/segments/<id>/embed`), the one VeloViewer shows on its Leaderboard tab. It leaves out athletes who hide themselves, so a rank can be missing; when 10th is hidden you're shown the last time listed, and beating that is enough. Some segments have no public leaderboard.
+- **Shape and elevation**: VeloViewer.
+
+Top 10 and shape are fetched only for segments in the map view up to your length limit, about 8 s each, and the top 10 again weekly. Until a segment's shape arrives it's a grey dot. Everything is kept in `data/strava`.
+
+Strava's own segment search (the API's segments/explore) has been closed to all but approved "Extended Access" apps since 1 September 2026, and the rest of its API now needs a paid subscription, so the planner doesn't use it.
+
 ## Roads you like and places to avoid
 
 One section under More holds liked roads, avoided roads and avoided areas. Tap "Avoid a road" (or "Like a road"), then tap the road on the map; the road is followed up to about 2 km each way. Disliked roads go to BRouter as a chain of small soft no-go circles, so they're avoided unless the way round is much longer. Liked roads are always favoured by the loop generator (ranking, and snapping when that's on). Stored on the server in `data/settings.json`.
@@ -128,6 +144,7 @@ docker/brouter.Dockerfile     BRouter 1.7.9
 docker/brouter-entrypoint.sh  data download, weekly refresh, server start
 docker/history.Dockerfile     intervals.icu history service
 history/server.py             the history service (Python standard library only)
+history/strava.py             segment hunter: bikeclimbs segment list, Strava top-10 times, VeloViewer shapes
 .github/workflows/images.yml  builds and pushes both images on every push to main
 ```
 

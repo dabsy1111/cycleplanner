@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import auth
 import heatgrid
 import heattiles
+import strava
 
 API_KEY = os.environ.get("ICU_API_KEY", "").strip()
 ATHLETE = os.environ.get("ICU_ATHLETE_ID", "0").strip() or "0"
@@ -464,6 +465,44 @@ def athlete_info():
         raise
 
 
+# Best power for each duration over the last 90 days, for the segment hunter's time predictions.
+# Checked daily; the last answer is kept in data/athlete-curve.json.
+CURVE_FILE = os.path.join(os.environ.get("DATA_DIR", "/data"), "athlete-curve.json")
+
+
+def athlete_curve():
+    """{secs: [...], watts: [...], updated} or None. Durations 5 s to 1 h."""
+    try:
+        with open(CURVE_FILE) as f:
+            stored = json.load(f)
+    except (OSError, ValueError):
+        stored = None
+    if stored and time.time() - stored.get("at", 0) < 86400:
+        return stored
+    try:
+        if not API_KEY:
+            raise RuntimeError("ICU_API_KEY not set")
+        d = api(f"/api/v1/athlete/{ATHLETE}/power-curves?type=Ride&curves=90d")
+        c = (d.get("list") or [d])[0] if isinstance(d, dict) else d[0]
+        secs = c.get("secs") or []
+        watts = c.get("values") or c.get("watts") or []
+        pts = [(s_, w) for s_, w in zip(secs, watts) if w and 5 <= s_ <= 3600]
+        if len(pts) < 5:
+            raise RuntimeError("no power curve")
+        keep, last = [], 0
+        for s_, w in pts:  # thin to ~60 points, evenly in log time
+            if s_ >= last * 1.12:
+                keep.append((s_, w))
+                last = s_
+        stored = {"secs": [k[0] for k in keep], "watts": [k[1] for k in keep], "updated": time.strftime("%Y-%m-%d"), "at": time.time()}
+        _write_json(CURVE_FILE, stored)
+    except Exception as e:
+        print("power curve:", str(e)[:150], flush=True)
+        if stored:
+            stored["at"] = time.time() - 86400 + 3600  # try again in an hour
+    return stored
+
+
 # ---------- Overpass proxy with a disk cache ----------
 # Toilets, water, cafés, lights and paths change slowly: answers are kept for a week, and an
 # old answer is served if every Overpass server is down or rate-limiting.
@@ -758,6 +797,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(502, json.dumps({"error": str(e)[:200]}).encode())
                 return
             self.send(200, json.dumps(info).encode())
+        elif path == "/api/athlete/curve":
+            self.send(200, json.dumps(athlete_curve()).encode())
         elif path.startswith("/api/routes/"):
             r = route_get(path.rsplit("/", 1)[1])
             self.send(200 if r else 404, json.dumps(r or {"error": "not found"}).encode())
@@ -800,6 +841,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(heatgrid.status()).encode())
         elif path.startswith("/api/heat/tile/"):
             self.heat_tile(path)
+        elif path.startswith("/api/strava/"):
+            self.strava_get(path)
+        else:
+            self.send(404, b'{"error":"not found"}')
+
+    def strava_get(self, path):
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        one = lambda k: (qs.get(k) or [""])[0]
+        if path == "/api/strava/status":
+            self.send(200, json.dumps(strava.status()).encode())
+        elif path == "/api/strava/segments":
+            try:
+                bbox = [float(v) for v in one("bbox").split(",")]
+                assert len(bbox) == 4 and (bbox[2] - bbox[0]) * (bbox[3] - bbox[1]) < 4
+            except (ValueError, AssertionError):
+                self.send(400, b'{"error":"bbox=s,w,n,e"}')
+                return
+            try:
+                max_m = float(one("maxkm")) * 1000 if one("maxkm") else None
+            except ValueError:
+                max_m = None
+            self.send(200, json.dumps(strava.in_bbox(bbox, max_m), separators=(",", ":")).encode())
         else:
             self.send(404, b'{"error":"not found"}')
 
@@ -882,6 +945,29 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send(200, json.dumps({"routes": heatgrid.score(routes), "grid": heatgrid.status()}).encode())
             return
+        p0 = self.path.split("?")[0].rstrip("/")
+        if p0.startswith("/api/strava/"):
+            try:
+                body = self.body_json()
+            except ValueError:
+                self.send(400, b'{"error":"bad JSON"}')
+                return
+            try:
+                if p0 == "/api/strava/segments":
+                    self.send(201, json.dumps(strava.add_segment(str(body.get("id", "")))).encode())
+                elif p0 == "/api/strava/hide":
+                    strava.hide(int(body["id"]), bool(body.get("hidden", True)))
+                    self.send(204, b"")
+                else:
+                    self.send(404, b'{"error":"not found"}')
+            except (ValueError, KeyError, TypeError) as e:
+                self.send(400, json.dumps({"error": str(e)[:200]}).encode())
+            except urllib.error.HTTPError as e:
+                msg = "Strava doesn't have that segment (or it's private)" if e.code == 404 else f"Strava answered {e.code}"
+                self.send(502, json.dumps({"error": msg}).encode())
+            except Exception as e:
+                self.send(502, json.dumps({"error": str(e)[:200]}).encode())
+            return
         if self.path.split("?")[0].rstrip("/") == "/api/regions/used":
             try:
                 tiles = self.body_json()
@@ -950,6 +1036,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_network, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=bikepath_scheduler, daemon=True).start()
+    strava.start([float(v) for v in BIKEPATH_BBOX.split(",")])
     if heattiles.configured():
         threading.Thread(target=heatgrid.scheduler, args=(BIKEPATH_BBOX,), daemon=True).start()
     print("Login: " + (f"on (user {auth.USERNAME})" if auth.enabled() else "OFF - set CP_PASSWORD before putting this on the internet"), flush=True)

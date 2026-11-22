@@ -1,7 +1,8 @@
 'use strict';
 /* Segment hunter: Strava segments where your power, your weight and the forecast wind add up to
    a top-10 time, and a route through the ones you pick.
-   Segments and their top-10 times come from the history service (history/strava.py). */
+   The segment list (bikeclimbs.com), top-10 times (Strava's public widget) and shapes (VeloViewer)
+   come from the history service (history/strava.py). */
 
 const HUNT_CDA = 0.30;        // flat out, on the drops (the ride-time model uses 0.32 on the hoods)
 const HUNT_WIND = 0.7;        // forecast wind is at 10 m; at rider height it's about 70% of that
@@ -50,20 +51,34 @@ function huntSpeed(P, grade, head, mass) {
 }
 
 // Pieces of ~100 m: length, gradient, bearing.
+// Climbing rate (m/h) implied by 10th place. Over 3,500 m/h (beyond a pro's 1-minute VAM) means the segment's elevation is GPS rubbish
+// (a "climb" ridden at 34 km/h), so it's treated as flat.
+function huntBadElevation(seg) {
+  const c = seg.coords;
+  if (!seg.target || !seg.has_ele || !c) return false;
+  let up = 0;
+  for (let i = 1; i < c.length; i++) if (c[i][2] != null && c[i - 1][2] != null && c[i][2] > c[i - 1][2]) up += c[i][2] - c[i - 1][2];
+  const grade = Math.abs(seg.grade || 0) / 100 * (seg.distance || 0);
+  return Math.max(up, grade) / seg.target * 3600 > 3500;
+}
+
 function huntPieces(seg) {
-  if (seg._pieces) return seg._pieces;
+  if (seg._pieces && seg._piecesFor === seg.target) return seg._pieces;
+  seg._piecesFor = seg.target;
   const c = seg.coords, out = [];
-  const flatGrade = (seg.grade || 0) / 100;
+  seg.badEle = huntBadElevation(seg);
+  const flatGrade = seg.badEle ? 0 : (seg.grade || 0) / 100;
   let a = 0, len = 0;
   for (let i = 1; i < c.length; i++) {
     len += haversine(c[i - 1], c[i]);
     if (len >= 100 || i === c.length - 1) {
-      const dz = seg.has_ele && c[i][2] != null && c[a][2] != null ? c[i][2] - c[a][2] : null;
+      const dz = seg.has_ele && !seg.badEle && c[i][2] != null && c[a][2] != null ? c[i][2] - c[a][2] : null;
       out.push({ len, grade: Math.max(-0.2, Math.min(0.2, dz != null && len > 20 ? dz / len : flatGrade)), brg: bearing(c[a], c[i]) });
       a = i; len = 0;
     }
   }
-  return (seg._pieces = out);
+  seg._pieces = out;
+  return out;
 }
 
 // Your predicted time: the power you can hold for t seconds has to carry you over the segment in t seconds.
@@ -97,25 +112,20 @@ async function huntLoadStatus() {
     huntStatusData = await r.json();
   } catch { huntStatusData = null; }
   renderHuntStatus();
-  const busy = huntStatusData && (huntStatusData.scan.running || huntStatusData.times_queued > 0);
+  const busy = huntStatusData && (huntStatusData.import.running || huntStatusData.times_queued > 0);
   clearTimeout(huntPoll);
   if (busy && huntOpen()) huntPoll = setTimeout(() => { huntLoadStatus(); huntLoadSegs(); }, 5000);
 }
 
 function renderHuntStatus() {
   const s = huntStatusData;
-  $('hunt-connect').hidden = !(s && s.configured && !s.connected);
-  $('hunt-scan').hidden = !(s && s.connected);
-  $('hunt-disconnect').hidden = !(s && s.connected);
   if (!s) { $('hunt-server').textContent = 'The history service isn\'t answering, and it\'s what looks up segments.'; return; }
   const bits = [];
-  if (!s.configured) bits.push('Strava API not set up, so segments can only be added by link (see the README to search whole areas).');
-  else if (!s.connected) bits.push('Connect Strava to search the map for segments.');
-  else bits.push(`Strava: ${s.athlete || 'connected'}.`);
-  const sc = s.scan;
-  if (sc.running) bits.push(`Searching… ${sc.done} areas checked, ${sc.found} segments${sc.waiting ? `, waiting ${Math.ceil(sc.waiting / 60)} min for Strava's rate limit` : ''}.`);
-  else if (sc.error) bits.push(`Search stopped: ${sc.error}`);
-  if (s.times_queued) bits.push(`Getting top-10 times: ${s.times_queued} to go (one every few seconds).`);
+  const im = s.import;
+  if (im.running) bits.push(`Building the segment list from bikeclimbs.com: ${im.done} of ${im.total} areas, ${s.segments.toLocaleString()} segments so far.`);
+  else bits.push(`${s.segments.toLocaleString()} segments known around Perth (from bikeclimbs.com: anything with an uphill average; add downhill ones by link).`);
+  if (im.error) bits.push(`List update stopped: ${im.error}`);
+  if (s.times_queued) bits.push(`Getting top-10 times and shapes: ${s.times_queued} to go, about ${Math.ceil(s.times_queued * 8 / 60)} min.`);
   if (s.times_error) bits.push(`Last problem: ${s.times_error}`);
   $('hunt-server').textContent = bits.join(' ');
 }
@@ -130,11 +140,11 @@ async function huntLoadSegs() {
   const [s, w, n, e] = huntBbox();
   if ((n - s) * (e - w) > 3.5) { huntSegs = []; huntSay('Zoom in to see segments.'); huntRender(); return; }
   try {
-    const r = await fetch(`/api/strava/segments?bbox=${[s, w, n, e].map((v) => v.toFixed(4)).join(',')}`);
+    const r = await fetch(`/api/strava/segments?bbox=${[s, w, n, e].map((v) => v.toFixed(4)).join(',')}&maxkm=${+$('hunt-maxkm').value || 5}`);
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const fresh = await r.json();
     const old = new Map(huntSegs.map((x) => [x.id, x]));
-    huntSegs = fresh.map((x) => { const o = old.get(x.id); return o && o.coords.length === x.coords.length ? Object.assign(o, x) : x; });
+    huntSegs = fresh.map((x) => { const o = old.get(x.id); return o && o.coords && x.coords && o.coords.length === x.coords.length ? Object.assign(o, x) : x; });
   } catch (err) { huntSay(`Couldn't load segments: ${err.message}`); return; }
   huntRecompute();
 }
@@ -150,6 +160,7 @@ function huntRecompute() {
   const maxKm = +$('hunt-maxkm').value || 999;
   for (const s of huntSegs) {
     s.pred = s.coords && s.coords.length > 1 && athlete ? huntPredict(s, w) : null;
+    if (!s.start && s.coords) s.start = s.coords[0];
     s.pct = s.pred && s.target ? (100 * (s.pred.secs - s.target)) / s.target : null;
     s.tooLong = (s.distance || 0) / 1000 > maxKm;
   }
@@ -163,11 +174,11 @@ function huntRecompute() {
 function huntFeatures() {
   const feats = [];
   for (const s of huntSegs) {
-    if (s.hidden || s.tooLong || !s.coords) continue;
+    if (s.hidden || s.tooLong || !s.start) continue;
     const cls = huntClass(s);
     const props = { id: s.id, cls, color: HUNT_COLOURS[cls], picked: huntPicked.has(s.id) ? 1 : 0 };
-    feats.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: s.coords.map((p) => [p[0], p[1]]) } });
-    feats.push({ type: 'Feature', properties: { ...props, start: 1 }, geometry: { type: 'Point', coordinates: [s.coords[0][0], s.coords[0][1]] } });
+    if (s.coords) feats.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: s.coords.map((p) => [p[0], p[1]]) } });
+    feats.push({ type: 'Feature', properties: { ...props, start: 1 }, geometry: { type: 'Point', coordinates: [s.start[0], s.start[1]] } });
   }
   return { type: 'FeatureCollection', features: feats };
 }
@@ -179,11 +190,12 @@ function huntRender() {
   const shown = huntSegs.filter((s) => !s.hidden && !s.tooLong);
   const ranked = shown.filter((s) => s.pct != null).sort((a, b) => a.pct - b.pct);
   const waiting = shown.filter((s) => s.pct == null && !s.lb_at);
+  const noShape = shown.filter((s) => s.lb_at && s.target && !s.coords).length;
   const noBoard = shown.filter((s) => s.lb_at && !s.target).length;
   const hiddenN = huntSegs.filter((s) => s.hidden).length, longN = huntSegs.filter((s) => s.tooLong && !s.hidden).length;
-  if (!huntSegs.length) huntSay(huntStatusData && huntStatusData.connected ? 'No segments known here yet: press "Find segments in this view".' : 'No segments here yet. Add one by link below.');
+  if (!huntSegs.length) huntSay(huntStatusData && huntStatusData.import.running ? 'No segments here yet: the list is still being built.' : 'No segments here. Add one by link below.');
   else huntSay(`${ranked.filter((s) => s.pct <= 0).length} of ${ranked.length} within top-10 reach` +
-    (waiting.length ? `, ${waiting.length} waiting for times` : '') + (noBoard ? `, ${noBoard} with no public leaderboard` : '') + (longN ? `, ${longN} longer than ${$('hunt-maxkm').value} km left out` : '') +
+    (waiting.length ? `, ${waiting.length} waiting for times` : '') + (noBoard ? `, ${noBoard} with no public leaderboard` : '') + (noShape ? `, ${noShape} with no shape on VeloViewer` : '') + (longN ? `, ${longN} longer than ${$('hunt-maxkm').value} km left out` : '') +
     (hiddenN ? `, ${hiddenN} hidden` : '') + '.');
   for (const s of ranked.slice(0, 40)) {
     const li = document.createElement('li');
@@ -210,6 +222,7 @@ function huntTogglePick(id, on) {
 }
 
 function huntShow(s) {
+  if (!s.coords) { map.flyTo({ center: s.start, zoom: 15 }); huntPopup(s, s.start); return; }
   const xs = s.coords.map((p) => p[0]), ys = s.coords.map((p) => p[1]);
   map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: 60, maxZoom: 16 });
   huntPopup(s, [s.coords[0][0], s.coords[0][1]]);
@@ -295,12 +308,6 @@ map.on('load', () => {
   map.on('mouseleave', 'hunt-line', () => { map.getCanvas().style.cursor = ''; });
   map.on('moveend', debounce(() => { if (huntOpen()) huntLoadSegs(); }, 700));
 
-  const q = new URLSearchParams(location.search).get('strava');
-  if (q) {
-    showMsg({ connected: 'Strava connected. Open Segment hunter and press "Find segments in this view".',
-      denied: 'Strava connection cancelled.', failed: 'Strava connection failed: check STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET.' }[q] || '');
-    history.replaceState(null, '', location.pathname + location.hash);
-  }
 });
 
 document.querySelector('details[data-key="hunt"]').addEventListener('toggle', async (ev) => {
@@ -311,24 +318,6 @@ document.querySelector('details[data-key="hunt"]').addEventListener('toggle', as
   huntLoadSegs();
 });
 
-$('hunt-connect').onclick = async () => {
-  try {
-    const r = await fetch(`/api/strava/connect?redirect=${encodeURIComponent(location.origin + '/api/strava/callback')}`);
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error);
-    location.href = j.url;
-  } catch (e) { huntSay(`Can't connect: ${e.message}`); }
-};
-$('hunt-disconnect').onclick = async () => { await fetch('/api/strava/disconnect', { method: 'POST', body: '{}' }); huntLoadStatus(); };
-$('hunt-scan').onclick = async () => {
-  try {
-    const r = await fetch('/api/strava/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bbox: huntBbox() }) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error);
-    if (!j.started) huntSay('A search is already running.');
-  } catch (e) { huntSay(`Can't search: ${e.message}`); }
-  huntLoadStatus();
-};
 $('hunt-add').onclick = async () => {
   const v = $('hunt-add-id').value.trim();
   if (!v) return;
@@ -349,5 +338,5 @@ $('hunt-route').onclick = huntRoute;
 $('hunt-effort').value = store.get('cp.hunt.effort', 100);
 $('hunt-maxkm').value = store.get('cp.hunt.maxkm', 5);
 $('hunt-effort').addEventListener('input', () => { store.set('cp.hunt.effort', +$('hunt-effort').value); huntRecompute(); });
-$('hunt-maxkm').addEventListener('input', () => { store.set('cp.hunt.maxkm', +$('hunt-maxkm').value); huntRecompute(); });
+$('hunt-maxkm').addEventListener('input', debounce(() => { store.set('cp.hunt.maxkm', +$('hunt-maxkm').value); huntLoadSegs(); }, 600));
 $('wind-time').addEventListener('change', async () => { if (!huntOpen()) return; await huntEnsureWind(); setTimeout(huntRecompute, 800); });

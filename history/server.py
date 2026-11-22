@@ -858,31 +858,11 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, AssertionError):
                 self.send(400, b'{"error":"bbox=s,w,n,e"}')
                 return
-            self.send(200, json.dumps(strava.in_bbox(bbox), separators=(",", ":")).encode())
-        elif path == "/api/strava/connect":
-            if not strava.configured():
-                self.send(400, b'{"error":"STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET are not set"}')
-                return
-            redirect = one("redirect")
-            if not re.match(r"^https?://[^/]+/api/strava/callback$", redirect):
-                self.send(400, b'{"error":"bad redirect"}')
-                return
-            self.send(200, json.dumps({"url": strava.authorize_url(redirect)}).encode())
-        elif path == "/api/strava/callback":
-            # Strava sends the browser back here after you approve. Swap the code for a token, then back to the app.
-            if one("error") or not one("code"):
-                where = "/?strava=denied"
-            else:
-                try:
-                    strava.exchange(one("code"))
-                    where = "/?strava=connected"
-                except Exception as e:
-                    print("strava connect failed:", e, flush=True)
-                    where = "/?strava=failed"
-            self.send_response(302)
-            self.send_header("Location", where)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            try:
+                max_m = float(one("maxkm")) * 1000 if one("maxkm") else None
+            except ValueError:
+                max_m = None
+            self.send(200, json.dumps(strava.in_bbox(bbox, max_m), separators=(",", ":")).encode())
         else:
             self.send(404, b'{"error":"not found"}')
 
@@ -973,21 +953,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.send(400, b'{"error":"bad JSON"}')
                 return
             try:
-                if p0 == "/api/strava/scan":
-                    bbox = [float(v) for v in body.get("bbox", [])]
-                    if len(bbox) != 4:
-                        raise ValueError("bbox: [s, w, n, e]")
-                    if not strava.connected():
-                        raise ValueError("connect Strava first")
-                    started = strava.start_scan(bbox)
-                    self.send(202, json.dumps({"started": started}).encode())
-                elif p0 == "/api/strava/segments":
+                if p0 == "/api/strava/segments":
                     self.send(201, json.dumps(strava.add_segment(str(body.get("id", "")))).encode())
                 elif p0 == "/api/strava/hide":
                     strava.hide(int(body["id"]), bool(body.get("hidden", True)))
-                    self.send(204, b"")
-                elif p0 == "/api/strava/disconnect":
-                    strava.disconnect()
                     self.send(204, b"")
                 else:
                     self.send(404, b'{"error":"not found"}')
@@ -1067,7 +1036,7 @@ if __name__ == "__main__":
     threading.Thread(target=update_network, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=bikepath_scheduler, daemon=True).start()
-    strava.start()
+    strava.start([float(v) for v in BIKEPATH_BBOX.split(",")])
     if heattiles.configured():
         threading.Thread(target=heatgrid.scheduler, args=(BIKEPATH_BBOX,), daemon=True).start()
     print("Login: " + (f"on (user {auth.USERNAME})" if auth.enabled() else "OFF - set CP_PASSWORD before putting this on the internet"), flush=True)

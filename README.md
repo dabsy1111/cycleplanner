@@ -27,9 +27,9 @@ To update after a new release, click **Update** on the stack in Dockge.
 | `HEATMAP_URL` (history) | empty | Tile URL of your popularity heatmap proxy, with `{activity}` `{color}` `{z}` `{x}` `{y}`. See below. |
 | `HEATMAP_DAYS` (history) | `90` | Ask the heatmap proxy again for tiles older than this. Old tiles are kept and used if the proxy is down. |
 | `HEATMAP_GAP` (history) | `0.3` | Seconds between requests to the heatmap proxy. |
-| `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET` (history) | empty | Your Strava API app, so the segment hunter can search the map for segments. See below. |
 | `STRAVA_LB_DAYS` (history) | `7` | Fetch a segment's top-10 times again once they're this old. |
-| `STRAVA_GAP` (history) | `3` | Seconds between top-10 and VeloViewer lookups. |
+| `STRAVA_GAP` (history) | `3` | Seconds between requests to bikeclimbs, Strava's widget and VeloViewer. |
+| `BIKECLIMBS_DAYS` (history) | `90` | Refresh the segment list this often. `0` turns the list off (segments by link only). |
 
 | `CP_USERNAME` (history) | `dan` | Login name for the planner. |
 | `CP_PASSWORD` (history) | empty | Login password. Empty means no login, which is only OK on your home network. |
@@ -87,12 +87,14 @@ The app reads your ride FTP and weight from intervals.icu (through the history s
 
 Finds Strava segments where you could make the top 10, and routes you through the ones you tick. For each segment it works out your time flat out: your best power for that length of effort over the last 90 days (from intervals.icu; if it has no power curve, FTP plus 16 kJ of anaerobic work), your weight, the segment's gradient, and the forecast wind at the time set in Weather & wind (70% of the 10 m forecast, for rider height). CdA 0.30, Crr 0.0045, 9 kg bike, rolling start. That's compared with 10th place: green you'd beat it, amber within 5%. "Effort" scales your power, e.g. 95% for tired legs. Tick segments and press Route: the route goes from your start point (or Home) through each one in the right direction and back, with points along each segment to keep it on there.
 
-Where the data comes from:
-- **Top 10**: Strava's public segment widget (`strava.com/segments/<id>/embed`), the one VeloViewer shows on its Leaderboard tab. No login. It leaves out athletes who hide themselves, so a rank can be missing; when 10th is hidden you're shown the last time listed, and beating that is enough. Refreshed weekly, only for segments you've looked at, one every few seconds.
+Where the data comes from (no Strava login or API key anywhere):
+- **The segment list**: [bikeclimbs.com](https://bikeclimbs.com), which lists every Strava ride segment with an uphill average (even 0.1%) by council and suburb, with its start, length and grade. The history service walks its WA pages once in the background (one page every 3 s, about 20 minutes), keeps segments starting inside `BIKEPATH_BBOX`, and refreshes every 90 days. Downhill segments aren't on bikeclimbs: paste their Strava link into "Add a segment".
+- **Top 10**: Strava's public segment widget (`strava.com/segments/<id>/embed`), the one VeloViewer shows on its Leaderboard tab. It leaves out athletes who hide themselves, so a rank can be missing; when 10th is hidden you're shown the last time listed, and beating that is enough. Some segments have no public leaderboard.
 - **Shape and elevation**: VeloViewer.
-- **Finding segments**: Strava's API, which needs your own (free) API app. Without it, paste segment links into "Add a segment".
 
-To set up searching: on strava.com/settings/api create an app, set **Authorization Callback Domain** to the host name you open the planner on (e.g. `optiplexer`, or your domain if it's on the internet, no port or `https://`), put its Client ID and Client Secret in `STRAVA_CLIENT_ID`/`STRAVA_CLIENT_SECRET`, redeploy, then open Segment hunter and press Connect Strava. "Find segments in this view" searches the map in ~3 km squares, splitting any busy square down to ~600 m (Strava returns at most 10 segments per search). It stays under Strava's limits (80 searches per 15 minutes, 900 a day), so a whole suburb takes a few minutes and the metro area takes hours; an area searched in the last 60 days isn't searched again. Everything is kept in `data/strava`.
+Top 10 and shape are fetched only for segments in the map view up to your length limit, about 8 s each, and the top 10 again weekly. Until a segment's shape arrives it's a grey dot. Everything is kept in `data/strava`.
+
+Strava's own segment search (the API's segments/explore) has been closed to all but approved "Extended Access" apps since 1 September 2026, and the rest of its API now needs a paid subscription, so the planner doesn't use it.
 
 ## Roads you like and places to avoid
 
@@ -142,7 +144,7 @@ docker/brouter.Dockerfile     BRouter 1.7.9
 docker/brouter-entrypoint.sh  data download, weekly refresh, server start
 docker/history.Dockerfile     intervals.icu history service
 history/server.py             the history service (Python standard library only)
-history/strava.py             segment hunter: Strava segments, top-10 times, VeloViewer shapes
+history/strava.py             segment hunter: bikeclimbs segment list, Strava top-10 times, VeloViewer shapes
 .github/workflows/images.yml  builds and pushes both images on every push to main
 ```
 

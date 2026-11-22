@@ -21,10 +21,6 @@ services:
       # Popularity heatmap proxy. {activity} {color} {z} {x} {y} are filled in. host.docker.internal
       # is this server; the proxy has to accept connections from outside itself (see README).
       HEATMAP_URL: "http://host.docker.internal:9999/{activity}/{color}/{z}/{x}/{y}.png"
-      # Segment hunter: your own Strava API app (strava.com/settings/api), to search the map for
-      # segments. Optional: without it you can still add segments by link. See README.
-      STRAVA_CLIENT_ID: ""
-      STRAVA_CLIENT_SECRET: ""
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

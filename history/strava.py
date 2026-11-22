@@ -1,22 +1,28 @@
 """Segment hunter: Strava segments, their top-10 times, and their shape. Standard library only.
 
-Where each piece comes from:
-  - Finding segments in an area: Strava's API (segments/explore), with your own Strava API app.
-    Optional: without it you can still add segments one at a time by link or ID.
+Where each piece comes from (none of it needs a Strava login or API key):
+  - The list of segments: bikeclimbs.com, which lists every Strava ride segment with an uphill
+    average (even 0.1%) by council and suburb, with its Strava ID, start point, length and grade.
+    Each area page carries up to 1,000 of them as JSON, so the whole Perth area is a few hundred
+    page loads. Imported once in the background (pages GAP seconds apart), refreshed every
+    BIKECLIMBS_DAYS, and only for areas that turned out to have segments inside BIKEPATH_BBOX.
+    Downhill segments aren't on bikeclimbs; add those by link.
   - Top 10: Strava's public segment widget (strava.com/segments/<id>/embed), the same one
-    VeloViewer shows on its Leaderboard tab. No login needed. Athletes who hide themselves are
-    left out of it, so a rank can be missing (1, 2, 4, 5, 8...).
-  - Shape and elevation: VeloViewer's segment streams, falling back to the explore polyline and
-    the segment's average gradient.
+    VeloViewer shows on its Leaderboard tab. Athletes who hide themselves are left out of it, so a
+    rank can be missing (1, 2, 4, 5, 8...).
+  - Shape and elevation: VeloViewer's segment streams.
+  Top 10 and shape are fetched only for segments you look at (in the map view, up to your
+  length limit), one every few seconds, and the top 10 again weekly.
 
-Everything is kept under DATA_DIR/strava. Top-10 times are refreshed weekly, slowly (one widget
-every few seconds), and only for segments you've looked at.
+(Strava's own segment search, segments/explore, has been closed to everyone but approved
+"Extended Access" apps since 1 Sep 2026, and the rest of its API needs a paid subscription.)
+
+Everything is kept under DATA_DIR/strava.
 
 Env:
-  STRAVA_CLIENT_ID, STRAVA_CLIENT_SECRET  your Strava API app (strava.com/settings/api)
-  STRAVA_REFRESH_TOKEN                    optional: skip the in-app "Connect Strava" step
-  STRAVA_LB_DAYS                          refresh top-10 times this often (default 7)
-  STRAVA_GAP                              seconds between widget/VeloViewer requests (default 3)
+  STRAVA_LB_DAYS     refresh top-10 times this often (default 7)
+  STRAVA_GAP         seconds between requests to bikeclimbs, Strava and VeloViewer (default 3)
+  BIKECLIMBS_DAYS    refresh the segment list this often (default 90; 0 = don't build it)
 """
 import json
 import math
@@ -29,30 +35,20 @@ import urllib.parse
 import urllib.request
 import html as htmllib
 
-CLIENT_ID = os.environ.get("STRAVA_CLIENT_ID", "").strip()
-CLIENT_SECRET = os.environ.get("STRAVA_CLIENT_SECRET", "").strip()
-ENV_REFRESH = os.environ.get("STRAVA_REFRESH_TOKEN", "").strip()
 LB_TTL = float(os.environ.get("STRAVA_LB_DAYS", "7")) * 86400
 GAP = float(os.environ.get("STRAVA_GAP", "3"))
+BC_TTL = float(os.environ.get("BIKECLIMBS_DAYS", "90")) * 86400
 DIR = os.path.join(os.environ.get("DATA_DIR", "/data"), "strava")
 SEG_FILE = os.path.join(DIR, "segments.json")
-TOKEN_FILE = os.path.join(DIR, "token.json")
-CELLS_FILE = os.path.join(DIR, "cells.json")
+AREAS_FILE = os.path.join(DIR, "bikeclimbs-areas.json")
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36 cycleplanner"
-API = "https://www.strava.com/api/v3"
-
-# Strava's default limits are 100 reads per 15 min and 1,000 a day. Stay well under them.
-READS_PER_15 = 80
-READS_PER_DAY = 900
-CELL_DAYS = 60          # an area searched in the last 60 days isn't searched again
-MIN_CELL = 0.006        # ~600 m: explore returns at most 10 segments, so busy cells are split down to this
-MAX_SCAN_AREA = 0.25    # square degrees (~50 x 50 km) per search
+BC = "https://bikeclimbs.com/climb/australia/western-australia"
 
 lock = threading.RLock()
 state = {
-    "scan": {"running": False, "done": 0, "queued": 0, "found": 0, "error": None},
-    "lb_error": None, "lb_last": None, "reads": [],
+    "import": {"running": False, "done": 0, "total": 0, "error": None},
+    "lb_error": None, "lb_last": None,
 }
 _wake = threading.Event()
 
@@ -75,7 +71,7 @@ def _write(path, obj):
 
 
 segments = _read(SEG_FILE, {})   # id (str) -> segment record
-cells = _read(CELLS_FILE, {})    # "s,w,n,e" -> time searched
+areas = _read(AREAS_FILE, {})    # bikeclimbs area slug -> {"at": time fetched, "inside": segments in the bbox}
 wanted = {}                      # id -> time last asked for (leaderboard refresh priority)
 
 
@@ -270,172 +266,101 @@ def lb_worker():
             time.sleep(GAP)
 
 
-# ---------- Strava API (finding segments) ----------
-def configured():
-    return bool(CLIENT_ID and CLIENT_SECRET)
+# ---------- the segment list, from bikeclimbs ----------
+def _bc_page(path):
+    body, _ = _get(f"{BC}/{path}" if path else BC, timeout=60)
+    return body.decode("utf-8", "replace")
 
 
-def _token():
-    tok = _read(TOKEN_FILE, {})
-    if not tok and ENV_REFRESH:
-        tok = {"refresh_token": ENV_REFRESH, "expires_at": 0}
-    return tok
-
-
-def connected():
-    return configured() and bool(_token().get("refresh_token"))
-
-
-def _token_call(params):
-    data = urllib.parse.urlencode({"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, **params}).encode()
-    req = urllib.request.Request("https://www.strava.com/oauth/token", data=data, headers={"User-Agent": UA})
+def _bc_segments(text):
+    """The mapSegments list on a bikeclimbs area page -> (list of dicts, truncated?).
+    It sits inside a JavaScript string (a Next.js data chunk): find that string, unescape it,
+    then parse the list where it starts."""
+    k = text.find('\\"mapSegments\\":')
+    if k < 0:
+        return [], False
+    lo = text.rfind('push([1,"', 0, k)
+    hi = text.find('"])', k)
+    if lo < 0 or hi < 0:
+        return [], False
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            tok = json.load(r)
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Strava refused the login ({e.code}): {e.read()[:200].decode('utf-8', 'replace')}") from e
-    keep = {k: tok.get(k) for k in ("access_token", "refresh_token", "expires_at")}
-    if tok.get("athlete"):
-        keep["athlete"] = f"{tok['athlete'].get('firstname', '')} {tok['athlete'].get('lastname', '')}".strip()
-    else:
-        keep["athlete"] = _token().get("athlete")
-    _write(TOKEN_FILE, keep)
-    return keep
+        chunk = json.loads(text[lo + 8:hi + 1])
+        at = chunk.index('"mapSegments":') + len('"mapSegments":')
+        segs, _ = json.JSONDecoder().raw_decode(chunk, at)
+        trunc = re.search(r'"isMapTruncated":(true|false)', chunk)
+    except ValueError:
+        return [], False
+    return segs, bool(trunc and trunc.group(1) == "true")
 
 
-def authorize_url(redirect):
-    return "https://www.strava.com/oauth/authorize?" + urllib.parse.urlencode({
-        "client_id": CLIENT_ID, "response_type": "code", "redirect_uri": redirect,
-        "approval_prompt": "auto", "scope": "read"})
-
-
-def exchange(code):
-    return _token_call({"code": code, "grant_type": "authorization_code"})
-
-
-def disconnect():
-    try:
-        os.remove(TOKEN_FILE)
-    except OSError:
-        pass
-
-
-def _access():
-    tok = _token()
-    if not tok.get("refresh_token"):
-        raise RuntimeError("Strava isn't connected")
-    if not tok.get("access_token") or tok.get("expires_at", 0) < time.time() + 120:
-        tok = _token_call({"refresh_token": tok["refresh_token"], "grant_type": "refresh_token"})
-    return tok["access_token"]
-
-
-def _budget_wait():
-    """Sleep until a Strava API read is within our share of the rate limit."""
-    while True:
-        now = time.time()
-        with lock:
-            state["reads"] = [t for t in state["reads"] if now - t < 86400]
-            last15 = [t for t in state["reads"] if now - t < 900]
-            if len(state["reads"]) >= READS_PER_DAY:
-                wait = state["reads"][0] + 86400 - now
-            elif len(last15) >= READS_PER_15:
-                wait = last15[0] + 900 - now
-            else:
-                state["reads"].append(now)
-                return
-        state["scan"]["waiting"] = round(wait)
-        time.sleep(min(wait + 1, 60))
-
-
-def api_get(path):
-    _budget_wait()
-    state["scan"].pop("waiting", None)
-    req = urllib.request.Request(API + path, headers={"Authorization": f"Bearer {_access()}", "User-Agent": UA})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 401:
-            raise RuntimeError("Strava rejected the connection (401): connect Strava again") from e
-        if e.code == 429:
-            raise RuntimeError("Strava rate limit reached: the search carries on later") from e
-        raise
-
-
-def _add_explored(s):
-    sid = str(s["id"])
-    pts = decode_polyline(s.get("points") or "")
-    with lock:
-        seg = segments.get(sid) or {"id": s["id"]}
-        seg.update(name=s.get("name") or seg.get("name"), distance=s.get("distance"), grade=s.get("avg_grade"),
-                   climb=s.get("climb_category"))
-        if not seg.get("has_ele") and len(pts) >= 2:
-            seg["coords"] = _thin([[round(p[1], 6), round(p[0], 6), None] for p in pts])
-        segments[sid] = seg
-        return seg
-
-
-def _cell_key(b):
-    return ",".join(f"{v:.4f}" for v in b)
-
-
-def scan(bbox):
-    """Search an area for segments: explore each cell, splitting any cell that comes back full."""
+def _inside(lat, lon, bbox):
     s, w, n, e = bbox
-    step = 0.03  # ~3 km starting cells
-    queue = []
-    lat = s
-    while lat < n - 1e-9:
-        lon = w
-        while lon < e - 1e-9:
-            queue.append([lat, lon, min(lat + step, n), min(lon + step, e)])
-            lon += step
-        lat += step
-    sc = state["scan"]
-    sc.update(running=True, done=0, queued=len(queue), found=0, error=None)
-    seen = set()
+    return s <= lat <= n and w <= lon <= e
+
+
+def _add_bc(x):
+    sid = str(x["stravaId"])
+    with lock:
+        seg = segments.get(sid) or {"id": x["stravaId"]}
+        seg.update(name=x.get("name") or seg.get("name"), distance=x.get("distance"),
+                   grade=round(x.get("averageGrade") or 0, 2), start=[x["startLongitude"], x["startLatitude"]],
+                   place=seg.get("place") or (x.get("suburbDisplay") or x.get("suburb") or "").replace("-", " ").title() or None)
+        segments[sid] = seg
+
+
+def import_bikeclimbs(bbox):
+    """Walk bikeclimbs' WA areas, keep segments starting inside bbox. Areas known to be outside
+    the bbox (no segments in it last time) are skipped until the next full refresh a year on."""
+    st = state["import"]
+    st.update(running=True, done=0, error=None)
     try:
-        while queue:
-            b = queue.pop(0)
-            sc["queued"] = len(queue)
-            key = _cell_key(b)
-            if time.time() - cells.get(key, 0) < CELL_DAYS * 86400:
-                sc["done"] += 1
+        index = _bc_page("")
+        slugs = sorted(set(re.findall(r'href="/climb/australia/western-australia/([a-z0-9-]+)"', index)))
+        now = time.time()
+        todo = [x for x in slugs if now - areas.get(x, {}).get("at", 0) > (BC_TTL if areas.get(x, {}).get("inside") else 365 * 86400)]
+        st["total"] = len(todo)
+        while todo:
+            slug = todo.pop(0)
+            time.sleep(GAP)
+            try:
+                text = _bc_page(slug)
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    time.sleep(600)
+                    todo.insert(0, slug)
+                    continue
+                areas[slug] = {"at": time.time(), "inside": 0, "error": e.code}
+                st["done"] += 1
                 continue
-            q = urllib.parse.urlencode({"bounds": ",".join(f"{v:.5f}" for v in b), "activity_type": "riding"})
-            res = api_get(f"/segments/explore?{q}").get("segments") or []
-            for x in res:
-                if x["id"] not in seen:
-                    seen.add(x["id"])
-                    _add_explored(x)
-                    wanted[str(x["id"])] = time.time()
-            sc["found"] = len(seen)
-            if len(res) >= 10 and (b[2] - b[0]) > MIN_CELL * 1.5:
-                ms, mw = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
-                queue[0:0] = [[b[0], b[1], ms, mw], [b[0], mw, ms, b[3]], [ms, b[1], b[2], mw], [ms, mw, b[2], b[3]]]
-            cells[key] = time.time()  # split cells too: their quarters are searched straight after
-            sc["done"] += 1
-            if sc["done"] % 10 == 0:
+            segs, trunc = _bc_segments(text)
+            inside = [x for x in segs if x.get("startLatitude") is not None and _inside(x["startLatitude"], x["startLongitude"], bbox)]
+            for x in inside:
+                _add_bc(x)
+            if trunc and (inside or not segs):
+                # More than 1,000 segments here: its suburbs (one level down) each get their own page.
+                subs = sorted(set(re.findall(rf'href="/climb/australia/western-australia/{re.escape(slug)}/([a-z0-9-]+)"', text)))
+                todo[0:0] = [f"{slug}/{x}" for x in subs if now - areas.get(f"{slug}/{x}", {}).get("at", 0) > BC_TTL]
+                st["total"] += len(subs)
+            areas[slug] = {"at": time.time(), "inside": len(inside)}
+            st["done"] += 1
+            if st["done"] % 10 == 0:
                 _save_segments()
-                _write(CELLS_FILE, cells)
-                _wake.set()
+                _write(AREAS_FILE, areas)
     except Exception as ex:
-        sc["error"] = str(ex)[:200]
+        st["error"] = str(ex)[:200]
     finally:
         _save_segments()
-        _write(CELLS_FILE, cells)
-        sc.update(running=False, queued=len(queue))
-        _wake.set()
+        _write(AREAS_FILE, areas)
+        st["running"] = False
+        st["at"] = time.time()
 
 
-def start_scan(bbox):
-    s, w, n, e = bbox
-    if not (n > s and e > w) or (n - s) * (e - w) > MAX_SCAN_AREA:
-        raise ValueError("zoom in: one search covers at most about 50 x 50 km")
-    if state["scan"]["running"]:
-        return False
-    threading.Thread(target=scan, args=(bbox,), daemon=True).start()
-    return True
+def import_scheduler(bbox):
+    """Import the segment list at start-up if it's due, then check daily."""
+    while True:
+        if not state["import"]["running"]:
+            import_bikeclimbs(bbox)
+        time.sleep(86400)
 
 
 # ---------- adding by hand ----------
@@ -469,37 +394,43 @@ def hide(sid, hidden=True):
 
 # ---------- what the app sees ----------
 def public(seg):
-    return {k: seg.get(k) for k in ("id", "name", "place", "distance", "grade", "climb", "coords", "has_ele",
-                                     "top", "target", "target_rank", "lb_at", "hazardous", "manual", "hidden")}
+    out = {k: seg.get(k) for k in ("id", "name", "place", "distance", "grade", "start", "coords", "has_ele",
+                                    "top", "target", "target_rank", "lb_at", "hazardous", "manual", "hidden")}
+    if not out["start"] and seg.get("coords"):
+        out["start"] = seg["coords"][0][:2]
+    return out
 
 
-def in_bbox(bbox):
+def in_bbox(bbox, max_m=None):
+    """Segments starting in the view. Those within the length limit go to the front of the queue
+    for top-10 times and shape."""
     s, w, n, e = bbox
     out = []
     now = time.time()
     with lock:
         for sid, seg in segments.items():
-            c = seg.get("coords")
-            if not c:
+            st = seg.get("start") or (seg["coords"][0] if seg.get("coords") else None)
+            if not st or not (s <= st[1] <= n and w <= st[0] <= e):
                 continue
-            if any(s <= p[1] <= n and w <= p[0] <= e for p in (c[0], c[-1])):
-                out.append(public(seg))
+            out.append(public(seg))
+            if not seg.get("hidden") and (max_m is None or (seg.get("distance") or 0) <= max_m):
                 wanted[sid] = now
     _wake.set()
     return out
 
 
 def status():
-    tok = _token() if configured() else {}
     with lock:
-        n = sum(1 for s in segments.values() if s.get("coords"))
+        n = len(segments)
         with_lb = sum(1 for s in segments.values() if s.get("lb_at"))
         now = time.time()
-        due = sum(1 for s in wanted if s in segments and now - (segments[s].get("lb_at") or 0) > LB_TTL)
-    return {"configured": configured(), "connected": connected(), "athlete": tok.get("athlete"),
-            "segments": n, "with_times": with_lb, "times_queued": due, "times_error": state["lb_error"],
-            "scan": state["scan"]}
+        due = sum(1 for s in wanted if s in segments and now - (segments[s].get("lb_at") or 0) > LB_TTL
+                  and now - (segments[s].get("lb_fail") or 0) > 3600)
+    return {"segments": n, "with_times": with_lb, "times_queued": due, "times_error": state["lb_error"],
+            "import": state["import"], "areas": sum(1 for a in areas.values() if a.get("inside"))}
 
 
-def start():
+def start(bbox):
     threading.Thread(target=lb_worker, daemon=True).start()
+    if BC_TTL > 0:  # BIKECLIMBS_DAYS=0 turns the list import off (segments by link only)
+        threading.Thread(target=import_scheduler, args=(bbox,), daemon=True).start()
